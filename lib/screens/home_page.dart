@@ -11,12 +11,14 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  int _counter = 0;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('we chat'),
-        leading: Icon(CupertinoIcons.home),
+        leading: const Icon(CupertinoIcons.home),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
@@ -32,18 +34,29 @@ class _HomePageState extends State<HomePage> {
           )
         ],
       ),
-
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('Counter'),
+            Text(
+              '$_counter',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+          ],
+        ),
+      ),
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom:15),
+        padding: const EdgeInsets.only(bottom: 15),
         child: FloatingActionButton(
           onPressed: () {
-            // Handle FAB action
+            setState(() {
+              _counter++;
+            });
           },
           child: const Icon(Icons.add),
         ),
       ),
-      
-      
     );
   }
 }
