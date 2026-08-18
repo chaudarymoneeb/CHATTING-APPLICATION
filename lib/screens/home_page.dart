@@ -1,5 +1,3 @@
-// ignore_for_file: prefer_const_constructors
-
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -15,35 +13,47 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('we chat'),
-        leading: Icon(CupertinoIcons.home),
+        title: const Text('We Chat'),
+
+        leading: const Icon(CupertinoIcons.home),
+
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
+
             onPressed: () {
-              // Handle search action
+              // Search action
             },
           ),
+
           IconButton(
             icon: const Icon(Icons.more_vert),
+
             onPressed: () {
-              // Handle more options action
+              // More options action
             },
-          )
+          ),
         ],
       ),
 
+      body: const Center(
+        child: Text(
+          'Welcome to We Chat',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+      ),
+
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom:15),
+        padding: const EdgeInsets.only(bottom: 15),
+
         child: FloatingActionButton(
           onPressed: () {
-            // Handle FAB action
+            // FAB action
           },
+
           child: const Icon(Icons.add),
         ),
       ),
-      
-      
     );
   }
 }
