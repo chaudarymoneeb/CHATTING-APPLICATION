@@ -1,6 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:chat_app/models/usermodel.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 
 /// `Apis` is a utility class — it holds only `static` members, so it is
 /// never meant to be instantiated. The private constructor `Apis._()`
@@ -119,5 +123,31 @@ class Apis {
         .collection('users')
         .where('id', isNotEqualTo: auth.currentUser?.uid)
         .snapshots();
+  }
+}
+
+class ImageHelper {
+  static Future<String> convertToBase64(File imageFile) async {
+    final bytes = await imageFile.readAsBytes();
+    return base64Encode(bytes);
+  }
+
+  static Widget getImageWidget(
+    String base64String, {
+    double width = 96,
+    double height = 96,
+  }) {
+    if (base64String.isEmpty) return const SizedBox();
+    try {
+      final bytes = base64Decode(base64String);
+      return Image.memory(
+        bytes,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+      );
+    } catch (e) {
+      return const SizedBox();
+    }
   }
 }

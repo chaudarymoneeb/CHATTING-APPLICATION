@@ -1,12 +1,17 @@
+// ignore_for_file: unnecessary_underscores, unused_local_variable
+
+import 'dart:io';
+import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:chat_app/api/api.dart';
 import 'package:chat_app/app_constant.dart';
 import 'package:chat_app/screens/home_screen.dart';
-import 'package:chat_app/screens/login_screen.dart'; // <-- adjust path if different
+import 'package:chat_app/screens/login_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:image_picker/image_picker.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -18,11 +23,15 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _aboutController = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
+
   User? _currentUser;
   String _savedName = '';
   String _savedAbout = '';
+  String _profileImageBase64 = ''; // Base64 encoded image
   bool _isEditing = false;
   bool _isSaving = false;
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -35,16 +44,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = _currentUser;
     if (user == null) return;
 
-    var about = 'Hey! I’m using We Chat';
+    var about = 'Hey! I\'m using We Chat';
+    var photoBase64 = '';
+
     try {
       final document = await Apis.firestore
           .collection('users')
           .doc(user.uid)
           .get();
       final data = document.data();
+
       if (data?['about'] is String &&
           (data?['about'] as String).trim().isNotEmpty) {
         about = data!['about'] as String;
+      }
+
+      // Get base64 image from Firestore if available
+      if (data?['profileImage'] is String &&
+          (data?['profileImage'] as String).isNotEmpty) {
+        photoBase64 = data!['profileImage'] as String;
       }
     } catch (error) {
       debugPrint('Unable to load profile: $error');
@@ -56,6 +74,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ? user.displayName!.trim()
           : 'User';
       _savedAbout = about;
+      _profileImageBase64 = photoBase64;
       _nameController.text = _savedName;
       _aboutController.text = _savedAbout;
     });
@@ -82,6 +101,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = _currentUser;
     final name = _nameController.text.trim();
     final about = _aboutController.text.trim();
+
     if (user == null) {
       _showSnackBar(
         'Your session has ended. Please sign in again.',
@@ -96,12 +116,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     FocusScope.of(context).unfocus();
     setState(() => _isSaving = true);
+
     try {
       await user.updateDisplayName(name);
       await user.reload();
+
+      // Update Firestore with name, about, and base64 image
       await Apis.firestore.collection('users').doc(user.uid).set({
         'name': name,
-        'about': about.isEmpty ? 'Hey! I’m using We Chat' : about,
+        'about': about.isEmpty ? 'Hey! I\'m using We Chat' : about,
+        'profileImage': _profileImageBase64, // Save base64 image
         'last_active': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -109,11 +133,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() {
         _currentUser = Apis.auth.currentUser;
         _savedName = name;
-        _savedAbout = about.isEmpty ? 'Hey! I’m using We Chat' : about;
+        _savedAbout = about.isEmpty ? 'Hey! I\'m using We Chat' : about;
         _aboutController.text = _savedAbout;
         _isEditing = false;
       });
-      _showSnackBar('Profile saved');
+      _showSnackBar('Profile saved successfully! ✨');
     } catch (error) {
       debugPrint('Unable to save profile: $error');
       _showSnackBar(
@@ -125,10 +149,73 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _pickAndUploadImage(ImageSource source) async {
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: source,
+        imageQuality: 60, // Lower quality to reduce base64 size
+        maxWidth: 500, // Resize to reduce base64 size
+        maxHeight: 500,
+      );
+
+      if (pickedFile == null) return; // User cancelled
+
+      setState(() => _isUploading = true);
+
+      // Convert image to base64
+      final base64Image = await _convertImageToBase64(File(pickedFile.path));
+
+      // Save base64 to Firestore
+      await _saveImageToFirestore(base64Image);
+
+      if (!mounted) return;
+      setState(() {
+        _profileImageBase64 = base64Image;
+      });
+
+      _showSnackBar('Profile picture updated successfully! ✨');
+    } catch (error) {
+      debugPrint('Failed to update photo: $error');
+      if (mounted) {
+        _showSnackBar(
+          'Failed to update photo. Please try again.',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
+  Future<String> _convertImageToBase64(File imageFile) async {
+    try {
+      final bytes = await imageFile.readAsBytes();
+      return base64Encode(bytes);
+    } catch (e) {
+      debugPrint('Error converting image to base64: $e');
+      throw Exception('Failed to convert image');
+    }
+  }
+
+  Future<void> _saveImageToFirestore(String base64Image) async {
+    final user = _currentUser;
+    if (user == null) throw Exception('User not signed in');
+
+    try {
+      // Update Firestore with base64 image
+      await Apis.firestore.collection('users').doc(user.uid).set({
+        'profileImage': base64Image,
+        'last_active': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      debugPrint('Base64 image saved to Firestore successfully');
+    } catch (e) {
+      debugPrint('Error saving image to Firestore: $e');
+      throw Exception('Failed to save image: $e');
+    }
+  }
+
   Future<void> _handleLogout() async {
-    // Capture the navigator BEFORE any await, so we don't depend on
-    // `context` still being valid/attached to the same tree after
-    // the dialog closes and async work runs.
     final navigator = Navigator.of(context, rootNavigator: true);
 
     final shouldLogOut = await showDialog<bool>(
@@ -167,12 +254,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
       await Apis.auth.signOut();
 
-      // Navigate straight to the LoginScreen widget instead of relying on
-      // a named route ('/login') that may not exist in the route table,
-      // and use the captured root navigator so this doesn't get skipped
-      // due to a stale/unmounted local context.
       navigator.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
         (route) => false,
       );
     } catch (error) {
@@ -196,8 +279,143 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ? AppColors.errorColor
               : AppColors.successColor,
           behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
         ),
       );
+  }
+
+  void _showBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+      ),
+      builder: (_) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle bar
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Title
+              const Text(
+                'Change Profile Picture',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Choose an option to update your profile photo',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              const SizedBox(height: 24),
+              // Two Images in a Row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  // Camera Option
+                  _buildBottomSheetImageOption(
+                    imagePath: 'assets/icons/camera.png',
+                    label: 'Camera',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _pickAndUploadImage(ImageSource.camera);
+                    },
+                  ),
+                  // Gallery Option
+                  _buildBottomSheetImageOption(
+                    imagePath: 'assets/icons/image-upload.png',
+                    label: 'Gallery',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _pickAndUploadImage(ImageSource.gallery);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              // Cancel Button
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    side: const BorderSide(color: Colors.grey),
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBottomSheetImageOption({
+    required String imagePath,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.grey[200]!, width: 1.5),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.asset(
+                imagePath,
+                width: 50,
+                height: 50,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[700],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -245,10 +463,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
       body: Stack(
         children: [
           SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 24, 16, 36),
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 100),
             child: Column(
               children: [
-                _ProfileAvatar(user: _currentUser!, name: _savedName),
+                // Profile Avatar with Edit Icon Overlay at Bottom-Right
+                Stack(
+                  alignment: Alignment.bottomRight,
+                  children: [
+                    _ProfileAvatar(
+                      user: _currentUser!,
+                      name: _savedName,
+                      imageBase64: _profileImageBase64,
+                    ),
+                    // Edit Icon at bottom-right
+                    Container(
+                      margin: const EdgeInsets.only(right: 4, bottom: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.15),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: CircleAvatar(
+                        radius: 18,
+                        backgroundColor: AppColors.primaryGreen,
+                        child: _isUploading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
+                                  ),
+                                ),
+                              )
+                            : IconButton(
+                                padding: EdgeInsets.zero,
+                                icon: const Icon(
+                                  Icons.edit_rounded,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                                onPressed: _showBottomSheet,
+                                tooltip: 'Change profile picture',
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 16),
                 Text(
                   _savedName.isEmpty ? 'Your profile' : _savedName,
@@ -266,26 +534,70 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   SizedBox(
                     width: double.infinity,
                     height: 52,
-                    child: OutlinedButton.icon(
-                      onPressed: _isSaving ? null : _handleLogout,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.errorColor,
-                        side: const BorderSide(color: AppColors.errorColor),
+                    child: FilledButton.icon(
+                      onPressed: _startEditing,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primaryGreen,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      icon: const Icon(Icons.logout_rounded),
-                      label: const Text('Log out'),
+                      icon: const Icon(Icons.update_rounded),
+                      label: const Text(
+                        'Update Profile',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (_isEditing)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryGreen.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.primaryGreen.withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          color: AppColors.primaryGreen,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'You are in edit mode. Tap Save to update or Cancel to discard changes.',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.primaryGreen,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
               ],
             ),
           ),
-          if (_isSaving)
+          if (_isSaving || _isUploading)
             const LinearProgressIndicator(color: AppColors.primaryGreen),
         ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _handleLogout,
+        backgroundColor: AppColors.errorColor,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.logout_rounded),
+        label: const Text('Logout'),
+        tooltip: 'Sign out of your account',
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -383,7 +695,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               color: AppColors.primaryGreen,
             ),
             const SizedBox(height: 16),
-            Text('You’re signed out', style: AppTextStyles.heading3),
+            Text('You\'re signed out', style: AppTextStyles.heading3),
             const SizedBox(height: 8),
             const Text('Sign in to view and edit your profile.'),
             const SizedBox(height: 16),
@@ -450,10 +762,15 @@ class _ProfileField extends StatelessWidget {
 }
 
 class _ProfileAvatar extends StatelessWidget {
-  const _ProfileAvatar({required this.user, required this.name});
+  const _ProfileAvatar({
+    required this.user,
+    required this.name,
+    required this.imageBase64,
+  });
 
   final User user;
   final String name;
+  final String imageBase64;
 
   @override
   Widget build(BuildContext context) {
@@ -466,6 +783,38 @@ class _ProfileAvatar extends StatelessWidget {
         style: AppTextStyles.heading1.copyWith(color: AppColors.primaryGreen),
       ),
     );
+
+    // Try to decode base64 image if available
+    if (imageBase64.isNotEmpty) {
+      try {
+        final bytes = base64Decode(imageBase64);
+        return Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: AppColors.primaryGreen.withValues(alpha: 0.35),
+              width: 2,
+            ),
+          ),
+          child: ClipOval(
+            child: SizedBox(
+              width: 96,
+              height: 96,
+              child: Image.memory(
+                bytes,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => fallback,
+              ),
+            ),
+          ),
+        );
+      } catch (e) {
+        debugPrint('Error decoding base64 image: $e');
+      }
+    }
+
+    // Fallback to Firebase Auth photoURL
     final photoUrl = user.photoURL?.trim() ?? '';
 
     return Container(
@@ -486,8 +835,8 @@ class _ProfileAvatar extends StatelessWidget {
                 child: CachedNetworkImage(
                   imageUrl: photoUrl,
                   fit: BoxFit.cover,
-                  placeholder: (_, _) => fallback,
-                  errorWidget: (_, _, _) => fallback,
+                  placeholder: (_, __) => fallback,
+                  errorWidget: (_, __, ___) => fallback,
                 ),
               ),
             ),
