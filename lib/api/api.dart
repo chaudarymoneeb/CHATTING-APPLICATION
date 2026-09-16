@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:chat_app/models/message_model.dart';
 import 'package:chat_app/models/usermodel.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -123,6 +124,83 @@ class Apis {
         .collection('users')
         .where('id', isNotEqualTo: auth.currentUser?.uid)
         .snapshots();
+  }
+
+  static String _chatConversationId(String userId1, String userId2) {
+    final ids = [userId1, userId2]..sort();
+    return '${ids[0]}_${ids[1]}';
+  }
+
+  /// Sends a new message to the other user inside a shared conversation room.
+  static Future<bool> sendMessage({
+    required String receiverId,
+    required String messageText,
+  }) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null || messageText.trim().isEmpty) return false;
+
+    final cleanText = messageText.trim();
+    final message = Message(
+      id: '${DateTime.now().millisecondsSinceEpoch}_${currentUser.uid}',
+      senderId: currentUser.uid,
+      receiverId: receiverId,
+      text: cleanText,
+      timestamp: DateTime.now(),
+      messageStatus: 'sent',
+      isSynced: true,
+    );
+
+    final chatId = _chatConversationId(currentUser.uid, receiverId);
+
+    await firestore
+        .collection('messages')
+        .doc(chatId)
+        .collection('thread')
+        .doc(message.id)
+        .set({
+          'id': message.id,
+          'senderId': message.senderId,
+          'receiverId': message.receiverId,
+          'text': message.text,
+          'timestamp': Timestamp.fromDate(message.timestamp),
+          'messageStatus': message.messageStatus,
+          'isSynced': message.isSynced,
+        });
+
+    return true;
+  }
+
+  /// Streams the ordered messages for the conversation between two users.
+  static Stream<List<Message>> getMessagesStream({
+    required String currentUserId,
+    required String otherUserId,
+  }) {
+    final chatId = _chatConversationId(currentUserId, otherUserId);
+
+    return firestore
+        .collection('messages')
+        .doc(chatId)
+        .collection('thread')
+        .orderBy('timestamp', descending: false)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
+            final timestamp = data['timestamp'];
+
+            return Message(
+              id: data['id'] as String? ?? doc.id,
+              senderId: data['senderId'] as String? ?? '',
+              receiverId: data['receiverId'] as String? ?? '',
+              text: data['text'] as String? ?? '',
+              timestamp: timestamp is Timestamp
+                  ? timestamp.toDate()
+                  : DateTime.now(),
+              messageStatus: data['messageStatus'] as String? ?? 'sent',
+              isSynced: data['isSynced'] as bool? ?? true,
+            );
+          }).toList();
+        });
   }
 }
 

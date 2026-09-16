@@ -2,13 +2,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:chat_app/app_constant.dart';
 import 'package:chat_app/helper/chat_user.dart';
 import 'package:chat_app/models/usermodel.dart';
+import 'package:chat_app/screens/chatscreen.dart';
 import 'package:flutter/material.dart';
 
 class ChatUserCard extends StatelessWidget {
-  const ChatUserCard({super.key, required this.user, this.onTap});
+  const ChatUserCard({super.key, required this.user});
 
   final ChatUser user;
-  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -16,13 +16,18 @@ class ChatUserCard extends StatelessWidget {
     final statusText = user.isOnline ? 'Online' : 'Offline';
 
     return Semantics(
-      button: onTap != null,
+      button: true,
       label: '$name, $statusText',
       child: Material(
         color: AppColors.cardBackground,
         borderRadius: BorderRadius.circular(18),
         child: InkWell(
-          onTap: onTap,
+          // ✅ FIXED: Navigation to ChatScreen added
+          onTap: () {
+            Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => ChatScreen(user: user)));
+          },
           borderRadius: BorderRadius.circular(18),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -45,7 +50,7 @@ class ChatUserCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         user.about.trim().isEmpty
-                            ? 'Hey! I’m using We Chat'
+                            ? 'Hey! I\'m using We Chat'
                             : user.about,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -64,10 +69,15 @@ class ChatUserCard extends StatelessWidget {
                       color: AppColors.successColor,
                     ),
                   ),
-                const SizedBox(width: 2),
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppColors.textSecondary,
+                const SizedBox(width: 8),
+
+                // ✅ TIME INSTEAD OF ARROW
+                Text(
+                  _formatLastMessageTime(user),
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -75,6 +85,28 @@ class ChatUserCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _formatLastMessageTime(ChatUser user) {
+    try {
+      final lastTime = DateTime.parse(user.lastActive);
+      final now = DateTime.now();
+      final difference = now.difference(lastTime);
+
+      if (difference.inSeconds < 60) {
+        return 'now';
+      } else if (difference.inMinutes < 60) {
+        return '${difference.inMinutes}m ago';
+      } else if (difference.inHours < 24) {
+        return '${difference.inHours}h ago';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays}d ago';
+      } else {
+        return '${lastTime.day}/${lastTime.month}';
+      }
+    } catch (e) {
+      return '';
+    }
   }
 }
 

@@ -211,10 +211,9 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
           itemCount: visibleUsers.length,
           separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (context, index) => ChatUserCard(
-            user: visibleUsers[index],
-            onTap: () => _showComingSoon('Private messaging'),
-          ),
+          // ✅ FIXED: Removed onTap parameter - navigation now in ChatUserCard
+          itemBuilder: (context, index) =>
+              ChatUserCard(user: visibleUsers[index]),
         );
       },
     );
