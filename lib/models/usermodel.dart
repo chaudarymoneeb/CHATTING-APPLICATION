@@ -1,51 +1,90 @@
+// lib/models/usermodel.dart
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class ChatUser {
-  const ChatUser({
-    required this.image,
-    required this.about,
-    required this.name,
-    required this.createdAt,
-    required this.isOnline,
-    required this.id,
-    required this.pushToken,
-    required this.email,
-    required this.lastActive,
-  });
+  final String id;
+  final String name;
+  final String email;
   final String image;
   final String about;
-  final String name;
-  final String createdAt;
   final bool isOnline;
-  final String id;
-  final String pushToken;
-  final String email;
+
+  /// ISO-8601 string (kept as String for compatibility with existing
+  /// screens that call DateTime.parse(user.lastActive)).
   final String lastActive;
+  final String pushToken;
+  final String createdAt;
 
-  factory ChatUser.fromJson(Map<String, dynamic> json, String docId) =>
-      ChatUser(
-        image: _asString(json['image']),
-        about: _asString(json['about']),
-        name: _asString(json['name']),
-        createdAt: _asString(json['created_at']),
-        isOnline: json['is_online'] == true,
-        id: docId,
-        pushToken: _asString(json['push_token']),
-        email: _asString(json['email']),
-        lastActive: _asString(json['last_active']),
-      );
+  /// User IDs that this user has blocked.
+  final List<String> blockedUsers;
 
-  static String _asString(dynamic value) => value?.toString() ?? '';
+  const ChatUser({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.image,
+    required this.about,
+    required this.isOnline,
+    required this.lastActive,
+    required this.pushToken,
+    required this.createdAt,
+    this.blockedUsers = const [],
+  });
 
-  Map<String, dynamic> toJson() {
-    return <String, dynamic>{
-      'image': image,
-      'about': about,
-      'name': name,
-      'created_at': createdAt,
-      'is_online': isOnline,
-      'id': id,
-      'push_token': pushToken,
-      'email': email,
-      'last_active': lastActive,
-    };
+  bool hasBlocked(String userId) => blockedUsers.contains(userId);
+
+  ChatUser copyWith({
+    String? name,
+    String? about,
+    String? image,
+    bool? isOnline,
+    List<String>? blockedUsers,
+  }) {
+    return ChatUser(
+      id: id,
+      name: name ?? this.name,
+      email: email,
+      image: image ?? this.image,
+      about: about ?? this.about,
+      isOnline: isOnline ?? this.isOnline,
+      lastActive: lastActive,
+      pushToken: pushToken,
+      createdAt: createdAt,
+      blockedUsers: blockedUsers ?? this.blockedUsers,
+    );
   }
+
+  factory ChatUser.fromJson(Map<String, dynamic> json, String id) {
+    return ChatUser(
+      id: id,
+      name: json['name'] as String? ?? 'User',
+      email: json['email'] as String? ?? '',
+      image: json['image'] as String? ?? '',
+      about: json['about'] as String? ?? "Hey! I'm using We Chat",
+      isOnline: json['is_online'] as bool? ?? false,
+      lastActive: _readTimeField(json['last_active']),
+      pushToken: json['push_token'] as String? ?? '',
+      createdAt: _readTimeField(json['created_at']),
+      blockedUsers: (json['blocked'] as List<dynamic>? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
+    );
+  }
+
+  static String _readTimeField(dynamic value) {
+    if (value is Timestamp) return value.toDate().toIso8601String();
+    if (value is String && value.isNotEmpty) return value;
+    return DateTime.now().toIso8601String();
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'email': email,
+    'image': image,
+    'about': about,
+    'is_online': isOnline,
+    'push_token': pushToken,
+  };
 }

@@ -1,3 +1,7 @@
+// lib/api/api.dart
+
+// ignore_for_file: unused_import
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,40 +11,27 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-/// `Apis` is a utility class — it holds only `static` members, so it is
-/// never meant to be instantiated. The private constructor `Apis._()`
-/// enforces that: nobody outside this file can even try to write `Apis()`,
-/// because the only constructor is private.
 class Apis {
   const Apis._();
 
-  /// Holds the currently logged-in user's profile data (from Firestore).
-  /// `late` means: "I promise this will be set before anyone reads it."
-  /// If something reads `Apis.me` before `getCurrentUserDetails()` has
-  /// successfully finished, this will throw a `LateInitializationError`.
   static late ChatUser me;
-
-  // Shared Firebase instances so the rest of the app never has to type
-  // `FirebaseAuth.instance` / `FirebaseFirestore.instance` directly.
   static final FirebaseAuth auth = FirebaseAuth.instance;
   static final FirebaseFirestore firestore = FirebaseFirestore.instance;
 
-  /// Returns true if the currently logged-in user already has a
-  /// document in the `users` collection.
+  // ======================================================================
+  // USER LIFECYCLE
+  // ======================================================================
+
   static Future<bool> userExists() async {
     final user = auth.currentUser;
     if (user == null) return false;
     return (await firestore.collection('users').doc(user.uid).get()).exists;
   }
 
-  /// Creates a Firestore document for a new user, or, if one already
-  /// exists, just marks them online and bumps `last_active`.
   static Future<void> createUser(User user) async {
     final userDocument = firestore.collection('users').doc(user.uid);
 
     if ((await userDocument.get()).exists) {
-      // Document already exists (e.g. user signed out and back in) —
-      // no need to recreate it, just refresh presence info.
       await userDocument.set({
         'is_online': true,
         'last_active': FieldValue.serverTimestamp(),
@@ -48,7 +39,6 @@ class Apis {
       return;
     }
 
-    // Brand-new user: build a fresh ChatUser with sensible defaults.
     final time = DateTime.now().millisecondsSinceEpoch.toString();
     final chatUser = ChatUser(
       id: user.uid,
@@ -64,25 +54,15 @@ class Apis {
 
     await userDocument.set({
       ...chatUser.toJson(),
+      'blocked': <String>[],
       'created_at': FieldValue.serverTimestamp(),
       'last_active': FieldValue.serverTimestamp(),
     });
   }
 
-  /// Loads the current user's profile into `me`.
-  ///
-  /// FIXES APPLIED vs the original version:
-  /// 1. Uses `await` directly instead of mixing `.then()` with `await`
-  ///    inside a non-async callback (that was a compile error).
-  /// 2. Guards against `auth.currentUser` being null, instead of letting
-  ///    `.doc(null)` silently create/read a bogus random document.
-  /// 3. When the user is brand new (no Firestore doc yet), it now
-  ///    creates the doc AND re-fetches it so `me` actually gets set.
-  ///    Previously, `me` was left uninitialized in this branch, which
-  ///    would crash the app the next time `Apis.me` was read.
   static Future<void> getCurrentUserDetails() async {
     final currentUser = auth.currentUser;
-    if (currentUser == null) return; // nothing to load if nobody's signed in
+    if (currentUser == null) return;
 
     final snapshot = await firestore
         .collection('users')
@@ -90,14 +70,9 @@ class Apis {
         .get();
 
     if (snapshot.exists) {
-      // Existing user — just parse what's already in Firestore.
       me = ChatUser.fromJson(snapshot.data()!, snapshot.id);
     } else {
-      // First-time user — create their document, then re-fetch it so
-      // `me` is populated with real (server-confirmed) data rather than
-      // being left unset.
       await createUser(currentUser);
-
       final newSnapshot = await firestore
           .collection('users')
           .doc(currentUser.uid)
@@ -106,7 +81,6 @@ class Apis {
     }
   }
 
-  /// Marks the current user online/offline in Firestore.
   static Future<void> setUserOnline(bool isOnline) async {
     final user = auth.currentUser;
     if (user == null) return;
@@ -117,8 +91,6 @@ class Apis {
     }, SetOptions(merge: true));
   }
 
-  /// Streams every user in the `users` collection except the currently
-  /// logged-in one (used for the chat list / contacts screen).
   static Stream<QuerySnapshot<Map<String, dynamic>>> getAllUsers() {
     return firestore
         .collection('users')
@@ -126,51 +98,168 @@ class Apis {
         .snapshots();
   }
 
+  // ======================================================================
+  // CHAT ID HELPER
+  // ======================================================================
+
   static String _chatConversationId(String userId1, String userId2) {
     final ids = [userId1, userId2]..sort();
     return '${ids[0]}_${ids[1]}';
   }
 
-  /// Sends a new message to the other user inside a shared conversation room.
+  static String chatIdFor(String userId1, String userId2) =>
+      _chatConversationId(userId1, userId2);
+
+  static CollectionReference<Map<String, dynamic>> _threadRef(
+    String otherUserId,
+  ) {
+    final currentUser = auth.currentUser;
+    final chatId = _chatConversationId(currentUser?.uid ?? '', otherUserId);
+    return firestore.collection('messages').doc(chatId).collection('thread');
+  }
+
+  static DocumentReference<Map<String, dynamic>> _chatDocRef(
+    String otherUserId,
+  ) {
+    final currentUser = auth.currentUser;
+    final chatId = _chatConversationId(currentUser?.uid ?? '', otherUserId);
+    return firestore.collection('chats').doc(chatId);
+  }
+
+  // ======================================================================
+  // ✅ NEW: ADD USER (creates empty chat so they show in list)
+  // ======================================================================
+
+  /// User ko apni chat list mein add karo — bina message bheje.
+  /// `chats/{chatId}` doc create hoga jismein dono participants honge.
+  static Future<bool> addUserToChats({required String otherUserId}) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+
+    try {
+      final ref = _chatDocRef(otherUserId);
+      final snap = await ref.get();
+
+      if (snap.exists) {
+        // Pehle se hai — dobara add karne ki zarurat nahi
+        return true;
+      }
+
+      await ref.set({
+        'chatId': _chatConversationId(currentUser.uid, otherUserId),
+        'participants': [currentUser.uid, otherUserId],
+        'lastMessage': '',
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'lastSenderId': '',
+        'addedBy': [currentUser.uid],
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      debugPrint('✅ User added to chat list: $otherUserId');
+      return true;
+    } catch (e) {
+      debugPrint('❌ addUserToChats error: $e');
+      return false;
+    }
+  }
+
+  /// Optional: agar aap chat ko list se hataana chahein (without deleting
+  /// messages). Sirf current user ka chat summary remove karta hai.
+  static Future<void> removeChatFromList({required String otherUserId}) async {
+    try {
+      await _chatDocRef(otherUserId).delete();
+    } catch (e) {
+      debugPrint('removeChatFromList error: $e');
+    }
+  }
+
+  // ======================================================================
+  // MESSAGES — send / stream
+  // ======================================================================
+
+  /// Sends a text message or attachment. Also writes/updates the chat
+  /// summary so both users see it in their home screen.
   static Future<bool> sendMessage({
     required String receiverId,
     required String messageText,
+    String fileType = 'text',
+    String fileUrl = '',
+    String fileName = '',
   }) async {
     final currentUser = auth.currentUser;
-    if (currentUser == null || messageText.trim().isEmpty) return false;
+    final isAttachment = fileType != 'text' && fileUrl.isNotEmpty;
+    if (currentUser == null) return false;
+    if (!isAttachment && messageText.trim().isEmpty) return false;
+
+    if (await hasBlocked(otherUserId: receiverId) ||
+        await isBlockedBy(otherUserId: receiverId)) {
+      return false;
+    }
 
     final cleanText = messageText.trim();
+    final now = DateTime.now();
+
     final message = Message(
-      id: '${DateTime.now().millisecondsSinceEpoch}_${currentUser.uid}',
+      id: '${now.millisecondsSinceEpoch}_${currentUser.uid}',
       senderId: currentUser.uid,
       receiverId: receiverId,
       text: cleanText,
-      timestamp: DateTime.now(),
+      timestamp: now,
       messageStatus: 'sent',
       isSynced: true,
+      fileType: fileType,
+      fileUrl: fileUrl,
+      fileName: fileName,
     );
 
-    final chatId = _chatConversationId(currentUser.uid, receiverId);
+    // 1) Actual message
+    await _threadRef(receiverId).doc(message.id).set(message.toFirestore());
 
-    await firestore
-        .collection('messages')
-        .doc(chatId)
-        .collection('thread')
-        .doc(message.id)
-        .set({
-          'id': message.id,
-          'senderId': message.senderId,
-          'receiverId': message.receiverId,
-          'text': message.text,
-          'timestamp': Timestamp.fromDate(message.timestamp),
-          'messageStatus': message.messageStatus,
-          'isSynced': message.isSynced,
-        });
+    // 2) Chat summary — so both users see it in list
+    final preview = isAttachment ? _previewFor(fileType) : cleanText;
+    await _upsertChatSummary(
+      otherUserId: receiverId,
+      lastMessage: preview,
+      lastMessageTime: now,
+      lastSenderId: currentUser.uid,
+    );
 
     return true;
   }
 
-  /// Streams the ordered messages for the conversation between two users.
+  static Future<void> _upsertChatSummary({
+    required String otherUserId,
+    required String lastMessage,
+    required DateTime lastMessageTime,
+    required String lastSenderId,
+  }) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return;
+
+    final ref = _chatDocRef(otherUserId);
+
+    await ref.set({
+      'chatId': _chatConversationId(currentUser.uid, otherUserId),
+      'participants': [currentUser.uid, otherUserId],
+      'lastMessage': lastMessage,
+      'lastMessageTime': Timestamp.fromDate(lastMessageTime),
+      'lastSenderId': lastSenderId,
+    }, SetOptions(merge: true));
+  }
+
+  static String _previewFor(String fileType) {
+    switch (fileType) {
+      case 'image':
+        return '📷 Photo';
+      case 'audio':
+        return '🎤 Voice message';
+      case 'document':
+        return '📄 Document';
+      default:
+        return '';
+    }
+  }
+
   static Stream<List<Message>> getMessagesStream({
     required String currentUserId,
     required String otherUserId,
@@ -184,25 +273,284 @@ class Apis {
         .orderBy('timestamp', descending: false)
         .snapshots()
         .map((snapshot) {
-          return snapshot.docs.map((doc) {
-            final data = doc.data();
-            final timestamp = data['timestamp'];
-
-            return Message(
-              id: data['id'] as String? ?? doc.id,
-              senderId: data['senderId'] as String? ?? '',
-              receiverId: data['receiverId'] as String? ?? '',
-              text: data['text'] as String? ?? '',
-              timestamp: timestamp is Timestamp
-                  ? timestamp.toDate()
-                  : DateTime.now(),
-              messageStatus: data['messageStatus'] as String? ?? 'sent',
-              isSynced: data['isSynced'] as bool? ?? true,
-            );
-          }).toList();
+          return snapshot.docs
+              .map((doc) => Message.fromFirestore(doc.data(), doc.id))
+              .toList();
         });
   }
+
+  static Future<void> editMessage({
+    required String receiverId,
+    required String messageId,
+    required String newText,
+  }) async {
+    final trimmed = newText.trim();
+    if (trimmed.isEmpty) return;
+    await _threadRef(receiverId).doc(messageId).update({
+      'text': trimmed,
+      'isEdited': true,
+      'editedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Future<void> deleteMessage({
+    required String receiverId,
+    required String messageId,
+  }) async {
+    await _threadRef(receiverId).doc(messageId).update({
+      'isDeleted': true,
+      'text': '',
+      'fileUrl': '',
+      'fileName': '',
+    });
+  }
+
+  static Future<void> toggleReaction({
+    required String receiverId,
+    required String messageId,
+    required String emoji,
+  }) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return;
+
+    final docRef = _threadRef(receiverId).doc(messageId);
+    await firestore.runTransaction((tx) async {
+      final snap = await tx.get(docRef);
+      if (!snap.exists) return;
+      final data = snap.data() as Map<String, dynamic>;
+      final reactions = Map<String, dynamic>.from(
+        data['reactions'] as Map<String, dynamic>? ?? {},
+      );
+
+      if (reactions[currentUser.uid] == emoji) {
+        reactions.remove(currentUser.uid);
+      } else {
+        reactions[currentUser.uid] = emoji;
+      }
+
+      tx.update(docRef, {'reactions': reactions});
+    });
+  }
+
+  static Future<void> markMessagesAsRead(String otherUserId) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return;
+
+    final unread = await _threadRef(otherUserId)
+        .where('receiverId', isEqualTo: currentUser.uid)
+        .where('messageStatus', isNotEqualTo: 'read')
+        .get();
+
+    if (unread.docs.isEmpty) return;
+
+    final batch = firestore.batch();
+    for (final doc in unread.docs) {
+      batch.update(doc.reference, {
+        'messageStatus': 'read',
+        'readAt': FieldValue.serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
+
+  // ======================================================================
+  // TYPING INDICATOR
+  // ======================================================================
+
+  static Future<void> updateTypingStatus({
+    required String receiverId,
+    required bool isTyping,
+  }) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return;
+    final chatId = _chatConversationId(currentUser.uid, receiverId);
+
+    await firestore
+        .collection('messages')
+        .doc(chatId)
+        .collection('typing')
+        .doc(currentUser.uid)
+        .set({'isTyping': isTyping, 'updatedAt': FieldValue.serverTimestamp()});
+  }
+
+  static Stream<bool> otherUserTypingStream(String otherUserId) {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return const Stream<bool>.empty();
+    final chatId = _chatConversationId(currentUser.uid, otherUserId);
+
+    return firestore
+        .collection('messages')
+        .doc(chatId)
+        .collection('typing')
+        .doc(otherUserId)
+        .snapshots()
+        .map((snap) {
+          final data = snap.data();
+          if (data == null) return false;
+          final isTyping = data['isTyping'] as bool? ?? false;
+          final updatedAt = data['updatedAt'];
+          if (isTyping && updatedAt is Timestamp) {
+            final age = DateTime.now().difference(updatedAt.toDate());
+            if (age.inSeconds > 8) return false;
+          }
+          return isTyping;
+        });
+  }
+
+  // ======================================================================
+  // ✅ NEW: CHAT LIST STREAM
+  // ======================================================================
+  //
+  // Returns all chats where the current user is a participant.
+  // Works for:
+  //   - Users they added manually
+  //   - Users they messaged
+  //   - Users who messaged them
+
+  static Stream<List<ChatSummary>> getMyChatsStream() {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return const Stream.empty();
+
+    return firestore
+        .collection('chats')
+        .where('participants', arrayContains: currentUser.uid)
+        .orderBy('lastMessageTime', descending: true)
+        .snapshots()
+        .asyncMap((snapshot) async {
+          final chats = <ChatSummary>[];
+
+          for (final doc in snapshot.docs) {
+            final data = doc.data();
+            final participants = List<String>.from(data['participants'] ?? []);
+
+            final otherId = participants.firstWhere(
+              (id) => id != currentUser.uid,
+              orElse: () => '',
+            );
+            if (otherId.isEmpty) continue;
+
+            // Fetch the other user's profile
+            try {
+              final userDoc = await firestore
+                  .collection('users')
+                  .doc(otherId)
+                  .get();
+              if (!userDoc.exists) continue;
+
+              final user = ChatUser.fromJson(userDoc.data()!, userDoc.id);
+              final lastTime = data['lastMessageTime'];
+              final lastMessageTime = lastTime is Timestamp
+                  ? lastTime.toDate()
+                  : DateTime.now();
+
+              chats.add(
+                ChatSummary(
+                  user: user,
+                  lastMessage: data['lastMessage'] as String? ?? '',
+                  lastMessageTime: lastMessageTime,
+                  lastSenderId: data['lastSenderId'] as String? ?? '',
+                  hasMessages:
+                      (data['lastMessage'] as String? ?? '').isNotEmpty,
+                ),
+              );
+            } catch (e) {
+              debugPrint('Error loading chat partner $otherId: $e');
+            }
+          }
+
+          return chats;
+        });
+  }
+
+  // ======================================================================
+  // BLOCKING & REPORTING
+  // ======================================================================
+
+  static Future<void> blockUser(String userId) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return;
+    await firestore.collection('users').doc(currentUser.uid).set({
+      'blocked': FieldValue.arrayUnion([userId]),
+    }, SetOptions(merge: true));
+  }
+
+  static Future<void> unblockUser(String userId) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return;
+    await firestore.collection('users').doc(currentUser.uid).set({
+      'blocked': FieldValue.arrayRemove([userId]),
+    }, SetOptions(merge: true));
+  }
+
+  static Stream<List<String>> blockedUserIdsStream() {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return const Stream<List<String>>.empty();
+    return firestore
+        .collection('users')
+        .doc(currentUser.uid)
+        .snapshots()
+        .map(
+          (snap) => (snap.data()?['blocked'] as List<dynamic>? ?? const [])
+              .map((e) => e.toString())
+              .toList(),
+        );
+  }
+
+  static Future<bool> hasBlocked({required String otherUserId}) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+    final doc = await firestore.collection('users').doc(currentUser.uid).get();
+    final blocked = doc.data()?['blocked'] as List<dynamic>? ?? const [];
+    return blocked.contains(otherUserId);
+  }
+
+  static Future<bool> isBlockedBy({required String otherUserId}) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+    final doc = await firestore.collection('users').doc(otherUserId).get();
+    final blocked = doc.data()?['blocked'] as List<dynamic>? ?? const [];
+    return blocked.contains(currentUser.uid);
+  }
+
+  static Future<void> reportUser({
+    required String userId,
+    required String reason,
+  }) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return;
+    await firestore.collection('reports').add({
+      'reportedUserId': userId,
+      'reportedBy': currentUser.uid,
+      'reason': reason,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
 }
+
+// ======================================================================
+// CHAT SUMMARY MODEL
+// ======================================================================
+
+/// Represents one row in the home screen chat list.
+class ChatSummary {
+  final ChatUser user;
+  final String lastMessage;
+  final DateTime lastMessageTime;
+  final String lastSenderId;
+  final bool hasMessages;
+
+  const ChatSummary({
+    required this.user,
+    required this.lastMessage,
+    required this.lastMessageTime,
+    required this.lastSenderId,
+    this.hasMessages = false,
+  });
+}
+
+// ======================================================================
+// IMAGE HELPER (kept for backward compatibility)
+// ======================================================================
 
 class ImageHelper {
   static Future<String> convertToBase64(File imageFile) async {

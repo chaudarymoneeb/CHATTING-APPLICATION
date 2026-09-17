@@ -1,9 +1,14 @@
+// lib/screens/home_screen.dart
+
+// ignore_for_file: unused_import
+
 import 'package:chat_app/api/api.dart';
 import 'package:chat_app/app_constant.dart';
 import 'package:chat_app/helper/chat_user.dart';
 import 'package:chat_app/models/usermodel.dart';
+import 'package:chat_app/screens/chatscreen.dart';
 import 'package:chat_app/screens/profile_screen.dart';
-import 'package:chat_app/widgets/chat_user_card.dart';
+import 'package:chat_app/screens/user_picker_screen.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -58,7 +63,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: _buildAppBar(),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showComingSoon('Adding a new contact'),
+        onPressed: () {
+          Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const UserPickerScreen()));
+        },
         backgroundColor: AppColors.primaryGreen,
         foregroundColor: Colors.white,
         elevation: 3,
@@ -68,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Column(
         children: [
           if (_isSearchVisible) _buildSearchBar(),
-          Expanded(child: _buildUserStream()),
+          Expanded(child: _buildChatList()),
         ],
       ),
     );
@@ -90,12 +99,12 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Text('We Chat', style: AppTextStyles.heading2),
           SizedBox(height: 2),
-          Text('People', style: AppTextStyles.bodySmall),
+          Text('Chats', style: AppTextStyles.bodySmall),
         ],
       ),
       actions: [
         IconButton(
-          tooltip: _isSearchVisible ? 'Close search' : 'Search people',
+          tooltip: _isSearchVisible ? 'Close search' : 'Search chats',
           onPressed: _isSearchVisible ? _closeSearch : _openSearch,
           icon: Icon(
             _isSearchVisible ? Icons.close_rounded : Icons.search_rounded,
@@ -148,7 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
         focusNode: _searchFocusNode,
         textInputAction: TextInputAction.search,
         decoration: InputDecoration(
-          hintText: 'Search by name or email',
+          hintText: 'Search chats by name or email',
           prefixIcon: const Icon(Icons.search_rounded),
           suffixIcon: _searchController.text.isEmpty
               ? null
@@ -180,49 +189,60 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildUserStream() {
-    return StreamBuilder(
-      stream: Apis.getAllUsers(),
+  // ============ CHAT LIST (NEW) ============
+  Widget _buildChatList() {
+    return StreamBuilder<List<ChatSummary>>(
+      stream: Apis.getMyChatsStream(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return _buildErrorState();
+        if (snapshot.hasError) {
+          debugPrint('Chat list error: ${snapshot.error}');
+          return _buildErrorState();
+        }
+
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: CircularProgressIndicator(color: AppColors.primaryGreen),
           );
         }
 
-        final documents = snapshot.data?.docs ?? [];
-        final currentUserId = Apis.auth.currentUser?.uid;
-        final users = documents
-            .map((document) => ChatUser.fromJson(document.data(), document.id))
-            .where((user) => user.id != currentUserId)
-            .toList();
-        final visibleUsers = users
+        final chats = snapshot.data ?? [];
+
+        final visibleChats = chats
             .where(
-              (user) => ChatUserHelper.matches(user, _searchController.text),
+              (c) => ChatUserHelper.matches(c.user, _searchController.text),
             )
             .toList();
 
-        if (users.isEmpty) return _buildEmptyState();
-        if (visibleUsers.isEmpty) return _buildNoResultsState();
+        if (chats.isEmpty) return _buildEmptyState();
+        if (visibleChats.isEmpty) return _buildNoResultsState();
 
         return ListView.separated(
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
-          itemCount: visibleUsers.length,
+          itemCount: visibleChats.length,
           separatorBuilder: (_, _) => const SizedBox(height: 8),
-          // ✅ FIXED: Removed onTap parameter - navigation now in ChatUserCard
-          itemBuilder: (context, index) =>
-              ChatUserCard(user: visibleUsers[index]),
+          itemBuilder: (context, index) {
+            final chat = visibleChats[index];
+            return _ChatTile(
+              chat: chat,
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ChatScreen(user: chat.user),
+                  ),
+                );
+              },
+            );
+          },
         );
       },
     );
   }
 
-  Widget _buildEmptyState() => _StatusPanel(
-    icon: CupertinoIcons.person_2_fill,
-    title: 'No one else is here yet',
-    message: 'Invite a friend and your conversations will appear here.',
+  Widget _buildEmptyState() => const _StatusPanel(
+    icon: CupertinoIcons.chat_bubble_2,
+    title: 'No chats yet',
+    message: 'Tap "New chat" to add someone and start a conversation.',
   );
 
   Widget _buildNoResultsState() => _StatusPanel(
@@ -233,9 +253,9 @@ class _HomeScreenState extends State<HomeScreen> {
     onAction: _searchController.clear,
   );
 
-  Widget _buildErrorState() => _StatusPanel(
+  Widget _buildErrorState() => const _StatusPanel(
     icon: CupertinoIcons.wifi_exclamationmark,
-    title: 'Unable to load people',
+    title: 'Unable to load chats',
     message: 'Check your connection and try again.',
   );
 
@@ -254,18 +274,175 @@ class _HomeScreenState extends State<HomeScreen> {
       ],
     );
   }
+}
 
-  void _showComingSoon(String feature) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('$feature will be available soon.'),
-          behavior: SnackBarBehavior.floating,
+// ======================================================================
+// CHAT TILE WIDGET
+// ======================================================================
+
+class _ChatTile extends StatelessWidget {
+  const _ChatTile({required this.chat, required this.onTap});
+
+  final ChatSummary chat;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = ChatUserHelper.displayName(chat.user);
+    final me = Apis.auth.currentUser?.uid;
+    final isMine = chat.lastSenderId == me;
+    final hasMessage = chat.lastMessage.isNotEmpty;
+
+    final subtitle = hasMessage
+        ? '${isMine ? "You: " : ""}${chat.lastMessage}'
+        : chat.user.about.trim().isEmpty
+        ? 'Tap to start chatting'
+        : chat.user.about;
+
+    return Material(
+      color: AppColors.cardBackground,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              _OnlineAvatar(
+                imageUrl: chat.user.image,
+                initials: ChatUserHelper.initials(chat.user),
+                isOnline: chat.user.isOnline,
+                radius: 28,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodyLarge.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        fontSize: 13,
+                        fontStyle: hasMessage
+                            ? FontStyle.normal
+                            : FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                hasMessage ? _shortTime(chat.lastMessageTime) : '',
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
         ),
-      );
+      ),
+    );
+  }
+
+  String _shortTime(DateTime t) {
+    final diff = DateTime.now().difference(t);
+    if (diff.inSeconds < 60) return 'now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+    if (diff.inHours < 24) return '${diff.inHours}h';
+    if (diff.inDays < 7) return '${diff.inDays}d';
+    return '${t.day}/${t.month}';
   }
 }
+
+// ======================================================================
+// ONLINE AVATAR (inline mini version)
+// ======================================================================
+
+class _OnlineAvatar extends StatelessWidget {
+  const _OnlineAvatar({
+    required this.imageUrl,
+    required this.initials,
+    required this.isOnline,
+    required this.radius,
+  });
+
+  final String imageUrl;
+  final String initials;
+  final bool isOnline;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = CircleAvatar(
+      radius: radius,
+      backgroundColor: AppColors.primaryGreen.withValues(alpha: 0.12),
+      child: Text(
+        initials,
+        style: TextStyle(
+          fontSize: radius * 0.5,
+          fontWeight: FontWeight.bold,
+          color: AppColors.primaryGreen,
+        ),
+      ),
+    );
+
+    return SizedBox(
+      width: radius * 2 + 4,
+      height: radius * 2 + 4,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipOval(
+            child: SizedBox(
+              width: radius * 2,
+              height: radius * 2,
+              child: imageUrl.trim().isEmpty
+                  ? fallback
+                  : Image.network(
+                      imageUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => fallback,
+                      loadingBuilder: (_, child, progress) =>
+                          progress == null ? child : fallback,
+                    ),
+            ),
+          ),
+          Positioned(
+            bottom: 0,
+            right: 0,
+            child: Container(
+              width: radius * 0.55,
+              height: radius * 0.55,
+              decoration: BoxDecoration(
+                color: isOnline ? AppColors.successColor : Colors.grey,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ======================================================================
+// HELPER WIDGETS
+// ======================================================================
 
 class _MenuItem extends StatelessWidget {
   const _MenuItem({required this.icon, required this.label});

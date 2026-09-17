@@ -11,6 +11,9 @@ class DatabaseService {
 
   DatabaseService._internal();
 
+  // Bumped from 1 -> 2 to add attachment/reaction/edit/delete/read columns.
+  static const int _dbVersion = 2;
+
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDatabase();
@@ -21,22 +24,60 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), 'chat_app.db');
     return openDatabase(
       path,
-      version: 1,
+      version: _dbVersion,
       onCreate: (database, version) async {
-        await database.execute('''
-          CREATE TABLE messages (
-            id TEXT PRIMARY KEY,
-            senderId TEXT NOT NULL,
-            receiverId TEXT NOT NULL,
-            text TEXT NOT NULL,
-            timestamp INTEGER NOT NULL,
-            messageStatus TEXT DEFAULT 'pending',
-            isSynced INTEGER DEFAULT 0
-          )
-        ''');
+        await database.execute(_createTableSql);
+      },
+      onUpgrade: (database, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await database.execute(
+            "ALTER TABLE messages ADD COLUMN fileType TEXT DEFAULT 'text'",
+          );
+          await database.execute(
+            "ALTER TABLE messages ADD COLUMN fileUrl TEXT DEFAULT ''",
+          );
+          await database.execute(
+            "ALTER TABLE messages ADD COLUMN fileName TEXT DEFAULT ''",
+          );
+          await database.execute(
+            "ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT '{}'",
+          );
+          await database.execute(
+            'ALTER TABLE messages ADD COLUMN isEdited INTEGER DEFAULT 0',
+          );
+          await database.execute(
+            'ALTER TABLE messages ADD COLUMN isDeleted INTEGER DEFAULT 0',
+          );
+          await database.execute(
+            'ALTER TABLE messages ADD COLUMN editedAt INTEGER',
+          );
+          await database.execute(
+            'ALTER TABLE messages ADD COLUMN readAt INTEGER',
+          );
+        }
       },
     );
   }
+
+  static const String _createTableSql = '''
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      senderId TEXT NOT NULL,
+      receiverId TEXT NOT NULL,
+      text TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      messageStatus TEXT DEFAULT 'pending',
+      isSynced INTEGER DEFAULT 0,
+      fileType TEXT DEFAULT 'text',
+      fileUrl TEXT DEFAULT '',
+      fileName TEXT DEFAULT '',
+      reactions TEXT DEFAULT '{}',
+      isEdited INTEGER DEFAULT 0,
+      isDeleted INTEGER DEFAULT 0,
+      editedAt INTEGER,
+      readAt INTEGER
+    )
+  ''';
 
   Future<int> addMessage(Message message) async {
     try {

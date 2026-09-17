@@ -1,25 +1,30 @@
 // lib/screens/chat_screen.dart
 
-// ignore_for_file: unnecessary_null_comparison, deprecated_member_use, file_names, avoid_print
+// ignore_for_file: duplicate_import, unnecessary_null_comparison, deprecated_member_use, file_names, avoid_print
 
 import 'dart:async';
 import 'dart:io';
 
-import 'package:chat_app/models/usermodel.dart';
-import 'package:chat_app/models/message_model.dart';
-import 'package:chat_app/api/database_service/database_service.dart';
 import 'package:chat_app/api/api.dart';
+import 'package:chat_app/api/cloudinary_cloud/cloudinary.dart';
+import 'package:chat_app/api/database_service/database_service.dart';
 import 'package:chat_app/app_constant.dart';
-import 'package:chat_app/helper/connectivity_helper.dart';
 import 'package:chat_app/helper/chat_user.dart';
+import 'package:chat_app/helper/connectivity_helper.dart';
+import 'package:chat_app/models/message_model.dart';
+import 'package:chat_app/models/usermodel.dart';
 
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
+import 'package:chat_app/api/cloudinary_cloud/cloudinary.dart'; // ✅ REAL service
+import 'package:chat_app/widgets/audio_message_bubble.dart';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 
 class ChatScreen extends StatefulWidget {
   final ChatUser user;
@@ -35,7 +40,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final FocusNode _focusNode = FocusNode();
 
   final _db = DatabaseService();
-  final ImagePicker _picker = ImagePicker(); // ✅ single instance
+  final ImagePicker _picker = ImagePicker();
+  final AudioRecorder _audioRecorder = AudioRecorder();
 
   StreamSubscription<List<Message>>? _messagesSubscription;
   StreamSubscription<bool>? _connectivitySubscription;
@@ -44,10 +50,14 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isOnline = true;
   String _currentUserId = '';
   bool _isSending = false;
-  bool _isUploading = false; // ✅ for attachments
-
-  // ✅ Emoji state
+  bool _isUploading = false;
   bool _showEmoji = false;
+
+  // Voice recording state
+  bool _isRecording = false;
+  DateTime? _recordStartTime;
+  Timer? _recordTimer;
+  String _recordDuration = '0:00';
 
   @override
   void initState() {
@@ -132,12 +142,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (success) {
         _messageController.clear();
-        _focusNode.unfocus();
+        // NOTE: no longer unfocusing so the keyboard stays up for chat flow
         if (_showEmoji) setState(() => _showEmoji = false);
         _scrollToBottom();
-        if (!_isOnline) {
-          _showSnackBar('💾 Saved. Will send when online.', isSuccess: true);
-        }
       } else {
         _showSnackBar('❌ Failed to send', isSuccess: false);
       }
@@ -148,29 +155,37 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // ============ UPLOAD & SEND ATTACHMENT ============
+  // ============ UPLOAD & SEND ATTACHMENT (via Cloudinary) ============
   Future<void> _uploadAndSendFile({
     required File file,
-    required String type, // 'image' | 'document'
+    required String type, // 'image' | 'document' | 'audio'
     String? fileName,
   }) async {
     if (_isUploading) return;
     setState(() => _isUploading = true);
 
     try {
-      final ext = file.path.split('.').last;
-      final storagePath =
-          'chat_attachments/${_currentUserId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
-      final ref = FirebaseStorage.instance.ref().child(storagePath);
+      // Cloudinary needs 'video' resource_type for audio to enable streaming.
+      final resourceType = type == 'audio' ? 'video' : 'auto';
 
-      final uploadTask = await ref.putFile(file);
-      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      final url = await CloudinaryService.uploadFile(
+        file,
+        resourceType: resourceType,
+        fileName: fileName,
+      );
 
-      // Use the API's existing message method; attachment-specific sending is
-      // not exposed by Apis.
+      if (url == null || url.isEmpty) {
+        _showSnackBar('☁️ Upload failed. Please try again.', isSuccess: false);
+        return;
+      }
+
+      // Pass fileType / fileUrl / fileName properly so the bubble renders.
       final success = await Apis.sendMessage(
         receiverId: widget.user.id,
-        messageText: downloadUrl,
+        messageText: '',
+        fileType: type,
+        fileUrl: url,
+        fileName: fileName ?? file.path.split('/').last,
       );
 
       if (success) {
@@ -192,10 +207,14 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final XFile? picked = await _picker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 70,
+        imageQuality: 80,
       );
       if (picked == null) return;
-      await _uploadAndSendFile(file: File(picked.path), type: 'image');
+      await _uploadAndSendFile(
+        file: File(picked.path),
+        type: 'image',
+        fileName: picked.name,
+      );
     } catch (e) {
       _showSnackBar('❌ Gallery error: $e', isSuccess: false);
     }
@@ -205,28 +224,26 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final XFile? picked = await _picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 70,
+        imageQuality: 80,
       );
       if (picked == null) return;
-      await _uploadAndSendFile(file: File(picked.path), type: 'image');
+      await _uploadAndSendFile(
+        file: File(picked.path),
+        type: 'image',
+        fileName: picked.name,
+      );
     } catch (e) {
       _showSnackBar('❌ Camera error: $e', isSuccess: false);
     }
   }
 
-  // ============ FIXED: _pickDocument() ============
   Future<void> _pickDocument() async {
     try {
       final result = await FilePicker.pickFiles(type: FileType.any);
-
-      // ✅ Proper null and empty check
       if (result == null || result.isEmpty) return;
 
-      // ✅ Use .first instead of .single for cleaner code
       final file = result.first;
       final path = file.path;
-
-      // ✅ Null-check the path
       if (path == null) return;
 
       await _uploadAndSendFile(
@@ -237,6 +254,73 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       debugPrint('Document picker error: $e');
       _showSnackBar('❌ Document error: $e', isSuccess: false);
+    }
+  }
+
+  // ============ VOICE RECORDING ============
+  Future<void> _startRecording() async {
+    try {
+      if (!await _audioRecorder.hasPermission()) {
+        _showSnackBar('🎤 Microphone permission denied', isSuccess: false);
+        return;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      await _audioRecorder.start(const RecordConfig(), path: path);
+
+      setState(() {
+        _isRecording = true;
+        _recordStartTime = DateTime.now();
+        _recordDuration = '0:00';
+      });
+
+      _recordTimer?.cancel();
+      _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted || _recordStartTime == null) return;
+        final elapsed = DateTime.now().difference(_recordStartTime!);
+        final m = elapsed.inMinutes;
+        final s = elapsed.inSeconds.remainder(60).toString().padLeft(2, '0');
+        setState(() => _recordDuration = '$m:$s');
+      });
+    } catch (e) {
+      debugPrint('Record start error: $e');
+      _showSnackBar('❌ Recording failed: $e', isSuccess: false);
+    }
+  }
+
+  Future<void> _stopAndSendRecording({bool cancel = false}) async {
+    try {
+      _recordTimer?.cancel();
+      final path = await _audioRecorder.stop();
+
+      setState(() {
+        _isRecording = false;
+        _recordStartTime = null;
+        _recordDuration = '0:00';
+      });
+
+      if (cancel || path == null) {
+        if (path != null) {
+          final f = File(path);
+          if (await f.exists()) await f.delete();
+        }
+        return;
+      }
+
+      final file = File(path);
+      if (!await file.exists()) return;
+
+      await _uploadAndSendFile(
+        file: file,
+        type: 'audio',
+        fileName: path.split('/').last,
+      );
+    } catch (e) {
+      debugPrint('Record stop error: $e');
+      _showSnackBar('❌ Recording failed: $e', isSuccess: false);
     }
   }
 
@@ -330,7 +414,9 @@ class _ChatScreenState extends State<ChatScreen> {
             radius: 20,
             backgroundColor: AppColors.primaryGreen.withValues(alpha: 0.12),
             backgroundImage: widget.user.image.trim().isNotEmpty
-                ? CachedNetworkImageProvider(widget.user.image)
+                ? CachedNetworkImageProvider(
+                    CloudinaryService.thumbnailUrl(widget.user.image),
+                  )
                 : null,
             child: widget.user.image.trim().isEmpty
                 ? Text(
@@ -456,16 +542,25 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ============ MESSAGE CONTENT ============
   Widget _buildMessageContent(Message message, bool isMe) {
-    // Uses `dynamic` casts so it compiles even if model isn't updated yet.
-    // Once Message has fileUrl/fileType, remove `as dynamic`.
-    final type = (message as dynamic).fileType?.toString() ?? 'text';
-    final url = (message as dynamic).fileUrl?.toString();
+    final type = message.fileType;
+    final url = message.fileUrl;
 
-    if (type == 'image' && url != null && url.isNotEmpty) {
+    if (message.isDeleted) {
+      return Text(
+        'This message was deleted',
+        style: TextStyle(
+          fontStyle: FontStyle.italic,
+          color: isMe ? Colors.white70 : AppColors.textSecondary,
+        ),
+      );
+    }
+
+    if (type == 'image' && url.isNotEmpty) {
+      final thumb = CloudinaryService.previewUrl(url);
       return ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: CachedNetworkImage(
-          imageUrl: url,
+          imageUrl: thumb,
           width: 220,
           fit: BoxFit.cover,
           placeholder: (c, u) => const SizedBox(
@@ -478,7 +573,7 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
-    if (type == 'document' && url != null && url.isNotEmpty) {
+    if (type == 'document' && url.isNotEmpty) {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -489,7 +584,7 @@ class _ChatScreenState extends State<ChatScreen> {
           const SizedBox(width: 8),
           Flexible(
             child: Text(
-              message.text.isNotEmpty ? message.text : 'Document',
+              message.fileName.isNotEmpty ? message.fileName : 'Document',
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 14,
@@ -501,7 +596,10 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
-    // default: text
+    if (type == 'audio' && url.isNotEmpty) {
+      return AudioMessageBubble(audioUrl: url, isMe: isMe);
+    }
+
     return Text(
       message.text,
       style: TextStyle(
@@ -531,7 +629,6 @@ class _ChatScreenState extends State<ChatScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // ✅ Upload progress banner
         if (_isUploading)
           Container(
             width: double.infinity,
@@ -545,10 +642,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 SizedBox(width: 10),
-                Text('Uploading attachment...'),
+                Text('Uploading to Cloudinary...'),
               ],
             ),
           ),
+
+        if (_isRecording) _buildRecordingBanner(),
 
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -564,6 +663,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: TextField(
                     controller: _messageController,
                     focusNode: _focusNode,
+                    enabled: !_isRecording,
                     decoration: InputDecoration(
                       hintText: 'Type a message...',
                       border: InputBorder.none,
@@ -592,33 +692,62 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
               ),
-              Container(
-                margin: const EdgeInsets.only(left: 4),
-                decoration: const BoxDecoration(
-                  color: AppColors.primaryGreen,
-                  shape: BoxShape.circle,
-                ),
-                child: IconButton(
-                  onPressed: _isSending ? null : _sendMessage,
-                  icon: _isSending
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Colors.white,
+              const SizedBox(width: 4),
+
+              // ✅ FIX: rebuild the send/mic button whenever the text changes
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _messageController,
+                builder: (context, value, _) {
+                  final hasText = value.text.trim().isNotEmpty;
+                  final showSend = hasText || _isRecording;
+
+                  return Container(
+                    decoration: const BoxDecoration(
+                      color: AppColors.primaryGreen,
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      onPressed: _isSending
+                          ? null
+                          : () {
+                              if (_isRecording) {
+                                _stopAndSendRecording();
+                              } else if (hasText) {
+                                _sendMessage();
+                              } else {
+                                _startRecording();
+                              }
+                            },
+                      icon: _isSending
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            )
+                          : Icon(
+                              // Show Send when typing OR recording,
+                              // otherwise show Mic.
+                              showSend
+                                  ? (_isRecording
+                                        ? Icons.stop
+                                        : Icons.send_rounded)
+                                  : Icons.mic,
+                              color: Colors.white,
                             ),
-                          ),
-                        )
-                      : const Icon(Icons.send_rounded, color: Colors.white),
-                ),
+                    ),
+                  );
+                },
               ),
             ],
           ),
         ),
 
-        if (_showEmoji)
+        if (_showEmoji && !_isRecording)
           SizedBox(
             height: 280,
             child: EmojiPicker(
@@ -666,6 +795,38 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildRecordingBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: AppColors.errorColor.withValues(alpha: 0.08),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: const BoxDecoration(
+              color: Colors.red,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'Recording… $_recordDuration',
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Colors.red,
+            ),
+          ),
+          const Spacer(),
+          TextButton(
+            onPressed: () => _stopAndSendRecording(cancel: true),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -746,10 +907,12 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _messagesSubscription?.cancel();
     _connectivitySubscription?.cancel();
+    _recordTimer?.cancel();
 
     _messageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
+    _audioRecorder.dispose();
     super.dispose();
   }
 }

@@ -1,8 +1,8 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:chat_app/app_constant.dart';
 import 'package:chat_app/helper/chat_user.dart';
 import 'package:chat_app/models/usermodel.dart';
 import 'package:chat_app/screens/chatscreen.dart';
+import 'package:chat_app/widgets/online_avatar.dart';
 import 'package:flutter/material.dart';
 
 class ChatUserCard extends StatelessWidget {
@@ -22,7 +22,6 @@ class ChatUserCard extends StatelessWidget {
         color: AppColors.cardBackground,
         borderRadius: BorderRadius.circular(18),
         child: InkWell(
-          // ✅ FIXED: Navigation to ChatScreen added
           onTap: () {
             Navigator.of(
               context,
@@ -33,7 +32,13 @@ class ChatUserCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               children: [
-                _UserAvatar(user: user),
+                OnlineAvatar(
+                  imageUrl: user.image,
+                  initials: ChatUserHelper.initials(user),
+                  isOnline: user.isOnline,
+                  radius: 28,
+                  badgeBorderColor: AppColors.cardBackground,
+                ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
@@ -60,18 +65,6 @@ class ChatUserCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (user.isOnline)
-                  const Tooltip(
-                    message: 'Online',
-                    child: Icon(
-                      Icons.circle,
-                      size: 12,
-                      color: AppColors.successColor,
-                    ),
-                  ),
-                const SizedBox(width: 8),
-
-                // ✅ TIME INSTEAD OF ARROW
                 Text(
                   _formatLastMessageTime(user),
                   style: AppTextStyles.bodySmall.copyWith(
@@ -107,38 +100,5 @@ class ChatUserCard extends StatelessWidget {
     } catch (e) {
       return '';
     }
-  }
-}
-
-class _UserAvatar extends StatelessWidget {
-  const _UserAvatar({required this.user});
-
-  final ChatUser user;
-
-  @override
-  Widget build(BuildContext context) {
-    final fallback = CircleAvatar(
-      radius: 28,
-      backgroundColor: AppColors.primaryGreen.withValues(alpha: 0.12),
-      child: Text(
-        ChatUserHelper.initials(user),
-        style: AppTextStyles.heading3.copyWith(color: AppColors.primaryGreen),
-      ),
-    );
-
-    if (user.image.trim().isEmpty) return fallback;
-
-    return ClipOval(
-      child: SizedBox(
-        width: 56,
-        height: 56,
-        child: CachedNetworkImage(
-          imageUrl: user.image,
-          fit: BoxFit.cover,
-          placeholder: (_, _) => fallback,
-          errorWidget: (_, _, _) => fallback,
-        ),
-      ),
-    );
   }
 }

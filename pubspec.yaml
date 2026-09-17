@@ -9,30 +9,46 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  # Icons
   cupertino_icons: ^1.0.8
+
+  # HTTP (needed for Cloudinary uploads)
+  http: ^1.2.2
+
+  # Voice messages
+  record: ^7.1.1
+  audioplayers: ^6.1.0
+
+  # File system
+  path_provider: ^2.1.6
+  path: ^1.8.0
+
+  # Emoji
   emoji_picker_flutter: ^4.5.4
+
+  # Firebase
   firebase_core: ^4.14.0
-  google_sign_in: ^7.2.0
   firebase_auth: ^6.6.0
   cloud_firestore: ^6.9.0
+  firebase_storage: ^13.5.0
+  google_sign_in: ^7.2.0
+
+  # Media
   cached_network_image: ^4.0.0
   image_picker: ^1.2.3
-  firebase_storage: ^13.5.0
-  path_provider: ^2.1.6
+  file_picker: ^13.1.0
 
   # Connectivity
   connectivity_plus: ^7.3.1
 
-  # SQLite
+  # Local database
   sqflite: ^2.3.0
-  path: ^1.8.0
-  file_picker: ^13.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  
 
 flutter:
   uses-material-design: true
