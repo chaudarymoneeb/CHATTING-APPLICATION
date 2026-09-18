@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:chat_app/api/api.dart';
 import 'package:chat_app/app_constant.dart';
+import 'package:chat_app/screens/full_screen_image.dart'; // 👈 NAYA IMPORT
 import 'package:chat_app/screens/home_screen.dart';
 import 'package:chat_app/screens/login_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -28,7 +29,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   User? _currentUser;
   String _savedName = '';
   String _savedAbout = '';
-  String _profileImageBase64 = ''; // Base64 encoded image
+  String _profileImageBase64 = '';
   bool _isEditing = false;
   bool _isSaving = false;
   bool _isUploading = false;
@@ -59,7 +60,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         about = data!['about'] as String;
       }
 
-      // Get base64 image from Firestore if available
       if (data?['profileImage'] is String &&
           (data?['profileImage'] as String).isNotEmpty) {
         photoBase64 = data!['profileImage'] as String;
@@ -121,11 +121,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await user.updateDisplayName(name);
       await user.reload();
 
-      // Update Firestore with name, about, and base64 image
       await Apis.firestore.collection('users').doc(user.uid).set({
         'name': name,
         'about': about.isEmpty ? 'Hey! I\'m using We Chat' : about,
-        'profileImage': _profileImageBase64, // Save base64 image
+        'profileImage': _profileImageBase64,
         'last_active': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -153,19 +152,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final XFile? pickedFile = await _picker.pickImage(
         source: source,
-        imageQuality: 60, // Lower quality to reduce base64 size
-        maxWidth: 500, // Resize to reduce base64 size
+        imageQuality: 60,
+        maxWidth: 500,
         maxHeight: 500,
       );
 
-      if (pickedFile == null) return; // User cancelled
+      if (pickedFile == null) return;
 
       setState(() => _isUploading = true);
 
-      // Convert image to base64
       final base64Image = await _convertImageToBase64(File(pickedFile.path));
 
-      // Save base64 to Firestore
       await _saveImageToFirestore(base64Image);
 
       if (!mounted) return;
@@ -202,7 +199,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (user == null) throw Exception('User not signed in');
 
     try {
-      // Update Firestore with base64 image
       await Apis.firestore.collection('users').doc(user.uid).set({
         'profileImage': base64Image,
         'last_active': FieldValue.serverTimestamp(),
@@ -284,6 +280,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
   }
 
+  // 👈 NAYA METHOD: Full screen image kholne ke liye
+  void _openFullScreenImage() {
+    final hasBase64 = _profileImageBase64.isNotEmpty;
+    final hasUrl = (_currentUser?.photoURL?.trim().isNotEmpty ?? false);
+
+    if (!hasBase64 && !hasUrl) {
+      _showSnackBar('No profile picture to show.');
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FullScreenImage(
+          imageBase64: _profileImageBase64,
+          imageUrl: _currentUser?.photoURL,
+        ),
+      ),
+    );
+  }
+
   void _showBottomSheet() {
     showModalBottomSheet(
       context: context,
@@ -299,7 +316,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Handle bar
               Container(
                 width: 40,
                 height: 4,
@@ -309,7 +325,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              // Title
               const Text(
                 'Change Profile Picture',
                 textAlign: TextAlign.center,
@@ -326,11 +341,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: TextStyle(fontSize: 14, color: Colors.grey),
               ),
               const SizedBox(height: 24),
-              // Two Images in a Row
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  // Camera Option
                   _buildBottomSheetImageOption(
                     imagePath: 'assets/icons/camera.png',
                     label: 'Camera',
@@ -339,7 +352,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       _pickAndUploadImage(ImageSource.camera);
                     },
                   ),
-                  // Gallery Option
                   _buildBottomSheetImageOption(
                     imagePath: 'assets/icons/image-upload.png',
                     label: 'Gallery',
@@ -351,7 +363,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
               const SizedBox(height: 24),
-              // Cancel Button
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
@@ -466,16 +477,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
             padding: const EdgeInsets.fromLTRB(16, 24, 16, 100),
             child: Column(
               children: [
-                // Profile Avatar with Edit Icon Overlay at Bottom-Right
                 Stack(
                   alignment: Alignment.bottomRight,
                   children: [
+                    // 👈 onTap pass kiya
                     _ProfileAvatar(
                       user: _currentUser!,
                       name: _savedName,
                       imageBase64: _profileImageBase64,
+                      onTap: _openFullScreenImage,
                     ),
-                    // Edit Icon at bottom-right
                     Container(
                       margin: const EdgeInsets.only(right: 4, bottom: 4),
                       decoration: BoxDecoration(
@@ -713,6 +724,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   );
 }
 
+// ============================================
+// _ProfileField (unchanged)
+// ============================================
 class _ProfileField extends StatelessWidget {
   const _ProfileField({
     required this.icon,
@@ -761,16 +775,21 @@ class _ProfileField extends StatelessWidget {
   );
 }
 
+// ============================================
+// _ProfileAvatar (UPDATED)
+// ============================================
 class _ProfileAvatar extends StatelessWidget {
   const _ProfileAvatar({
     required this.user,
     required this.name,
     required this.imageBase64,
+    this.onTap, // 👈 NAYA
   });
 
   final User user;
   final String name;
   final String imageBase64;
+  final VoidCallback? onTap; // 👈 NAYA
 
   @override
   Widget build(BuildContext context) {
@@ -784,49 +803,29 @@ class _ProfileAvatar extends StatelessWidget {
       ),
     );
 
-    // Try to decode base64 image if available
+    Widget imageWidget;
+
     if (imageBase64.isNotEmpty) {
       try {
         final bytes = base64Decode(imageBase64);
-        return Container(
-          padding: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: AppColors.primaryGreen.withValues(alpha: 0.35),
-              width: 2,
-            ),
-          ),
-          child: ClipOval(
-            child: SizedBox(
-              width: 96,
-              height: 96,
-              child: Image.memory(
-                bytes,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => fallback,
-              ),
+        imageWidget = ClipOval(
+          child: SizedBox(
+            width: 96,
+            height: 96,
+            child: Image.memory(
+              bytes,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => fallback,
             ),
           ),
         );
       } catch (e) {
         debugPrint('Error decoding base64 image: $e');
+        imageWidget = fallback;
       }
-    }
-
-    // Fallback to Firebase Auth photoURL
-    final photoUrl = user.photoURL?.trim() ?? '';
-
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: AppColors.primaryGreen.withValues(alpha: 0.35),
-          width: 2,
-        ),
-      ),
-      child: photoUrl.isEmpty
+    } else {
+      final photoUrl = user.photoURL?.trim() ?? '';
+      imageWidget = photoUrl.isEmpty
           ? fallback
           : ClipOval(
               child: SizedBox(
@@ -839,7 +838,25 @@ class _ProfileAvatar extends StatelessWidget {
                   errorWidget: (_, __, ___) => fallback,
                 ),
               ),
+            );
+    }
+
+    return GestureDetector(
+      onTap: onTap, // 👈 TAP HANDLE
+      child: Hero(
+        tag: 'profile-avatar', // 👈 SMOOTH ANIMATION
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: AppColors.primaryGreen.withValues(alpha: 0.35),
+              width: 2,
             ),
+          ),
+          child: imageWidget,
+        ),
+      ),
     );
   }
 }

@@ -99,7 +99,7 @@ class Apis {
   }
 
   // ======================================================================
-  // CHAT ID HELPER
+  // CHAT ID HELPERS
   // ======================================================================
 
   static String _chatConversationId(String userId1, String userId2) {
@@ -127,11 +127,9 @@ class Apis {
   }
 
   // ======================================================================
-  // ✅ NEW: ADD USER (creates empty chat so they show in list)
+  // ADD USER
   // ======================================================================
 
-  /// User ko apni chat list mein add karo — bina message bheje.
-  /// `chats/{chatId}` doc create hoga jismein dono participants honge.
   static Future<bool> addUserToChats({required String otherUserId}) async {
     final currentUser = auth.currentUser;
     if (currentUser == null) return false;
@@ -140,10 +138,7 @@ class Apis {
       final ref = _chatDocRef(otherUserId);
       final snap = await ref.get();
 
-      if (snap.exists) {
-        // Pehle se hai — dobara add karne ki zarurat nahi
-        return true;
-      }
+      if (snap.exists) return true;
 
       await ref.set({
         'chatId': _chatConversationId(currentUser.uid, otherUserId),
@@ -152,6 +147,9 @@ class Apis {
         'lastMessageTime': FieldValue.serverTimestamp(),
         'lastSenderId': '',
         'addedBy': [currentUser.uid],
+        'mutedBy': <String>[],
+        'muteExpiry': <String, dynamic>{},
+        'archivedBy': <String>[],
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -163,8 +161,6 @@ class Apis {
     }
   }
 
-  /// Optional: agar aap chat ko list se hataana chahein (without deleting
-  /// messages). Sirf current user ka chat summary remove karta hai.
   static Future<void> removeChatFromList({required String otherUserId}) async {
     try {
       await _chatDocRef(otherUserId).delete();
@@ -174,11 +170,9 @@ class Apis {
   }
 
   // ======================================================================
-  // MESSAGES — send / stream
+  // MESSAGES
   // ======================================================================
 
-  /// Sends a text message or attachment. Also writes/updates the chat
-  /// summary so both users see it in their home screen.
   static Future<bool> sendMessage({
     required String receiverId,
     required String messageText,
@@ -212,10 +206,8 @@ class Apis {
       fileName: fileName,
     );
 
-    // 1) Actual message
     await _threadRef(receiverId).doc(message.id).set(message.toFirestore());
 
-    // 2) Chat summary — so both users see it in list
     final preview = isAttachment ? _previewFor(fileType) : cleanText;
     await _upsertChatSummary(
       otherUserId: receiverId,
@@ -354,7 +346,7 @@ class Apis {
   }
 
   // ======================================================================
-  // TYPING INDICATOR
+  // TYPING
   // ======================================================================
 
   static Future<void> updateTypingStatus({
@@ -398,16 +390,131 @@ class Apis {
   }
 
   // ======================================================================
-  // ✅ NEW: CHAT LIST STREAM
+  // MUTE / ARCHIVE
   // ======================================================================
-  //
-  // Returns all chats where the current user is a participant.
-  // Works for:
-  //   - Users they added manually
-  //   - Users they messaged
-  //   - Users who messaged them
 
-  static Stream<List<ChatSummary>> getMyChatsStream() {
+  /// Mute the chat. If [duration] is null → "Always" (permanent).
+  /// If provided, the mute auto-expires after the duration.
+  static Future<bool> muteChat({
+    required String otherUserId,
+    Duration? duration,
+  }) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+
+    try {
+      final ref = _chatDocRef(otherUserId);
+      final expiryMs = duration == null
+          ? 0
+          : DateTime.now().add(duration).millisecondsSinceEpoch;
+
+      await ref.set({
+        'mutedBy': FieldValue.arrayUnion([currentUser.uid]),
+        'muteExpiry': {currentUser.uid: expiryMs},
+      }, SetOptions(merge: true));
+      return true;
+    } catch (e) {
+      debugPrint('muteChat error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> unmuteChat({required String otherUserId}) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+
+    try {
+      final ref = _chatDocRef(otherUserId);
+      await ref.set({
+        'mutedBy': FieldValue.arrayRemove([currentUser.uid]),
+        'muteExpiry': {currentUser.uid: FieldValue.delete()},
+      }, SetOptions(merge: true));
+      return true;
+    } catch (e) {
+      debugPrint('unmuteChat error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> archiveChat({required String otherUserId}) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+
+    try {
+      await _chatDocRef(otherUserId).set({
+        'archivedBy': FieldValue.arrayUnion([currentUser.uid]),
+      }, SetOptions(merge: true));
+      return true;
+    } catch (e) {
+      debugPrint('archiveChat error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> unarchiveChat({required String otherUserId}) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+
+    try {
+      await _chatDocRef(otherUserId).set({
+        'archivedBy': FieldValue.arrayRemove([currentUser.uid]),
+      }, SetOptions(merge: true));
+      return true;
+    } catch (e) {
+      debugPrint('unarchiveChat error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> isChatMuted({required String otherUserId}) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+    final snap = await _chatDocRef(otherUserId).get();
+    if (!snap.exists) return false;
+    return _computeMuted(snap.data(), currentUser.uid);
+  }
+
+  static Future<bool> isChatArchived({required String otherUserId}) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+    final snap = await _chatDocRef(otherUserId).get();
+    if (!snap.exists) return false;
+    final archived = List<String>.from(snap.data()?['archivedBy'] ?? []);
+    return archived.contains(currentUser.uid);
+  }
+
+  static bool _computeMuted(Map<String, dynamic>? data, String uid) {
+    if (data == null) return false;
+    final mutedBy = List<String>.from(data['mutedBy'] ?? const []);
+    if (!mutedBy.contains(uid)) return false;
+
+    final expiryMap = Map<String, dynamic>.from(
+      data['muteExpiry'] as Map? ?? const {},
+    );
+    final raw = expiryMap[uid];
+    if (raw == null) return true;
+
+    int ms = 0;
+    if (raw is int) ms = raw;
+    if (raw is Timestamp) ms = raw.millisecondsSinceEpoch;
+
+    if (ms == 0) return true;
+    return DateTime.fromMillisecondsSinceEpoch(ms).isAfter(DateTime.now());
+  }
+
+  // ======================================================================
+  // CHAT LISTS
+  // ======================================================================
+
+  /// Main chat list — excludes chats archived by me.
+  static Stream<List<ChatSummary>> getMyChatsStream() =>
+      _chatsStream(archived: false);
+
+  /// Archived chats — only chats I archived.
+  static Stream<List<ChatSummary>> getArchivedChatsStream() =>
+      _chatsStream(archived: true);
+
+  static Stream<List<ChatSummary>> _chatsStream({required bool archived}) {
     final currentUser = auth.currentUser;
     if (currentUser == null) return const Stream.empty();
 
@@ -417,19 +524,23 @@ class Apis {
         .orderBy('lastMessageTime', descending: true)
         .snapshots()
         .asyncMap((snapshot) async {
-          final chats = <ChatSummary>[];
+          final results = <ChatSummary>[];
 
           for (final doc in snapshot.docs) {
             final data = doc.data();
             final participants = List<String>.from(data['participants'] ?? []);
-
             final otherId = participants.firstWhere(
               (id) => id != currentUser.uid,
               orElse: () => '',
             );
             if (otherId.isEmpty) continue;
 
-            // Fetch the other user's profile
+            final archivedBy = List<String>.from(
+              data['archivedBy'] ?? const [],
+            );
+            final isArchived = archivedBy.contains(currentUser.uid);
+            if (isArchived != archived) continue;
+
             try {
               final userDoc = await firestore
                   .collection('users')
@@ -443,7 +554,7 @@ class Apis {
                   ? lastTime.toDate()
                   : DateTime.now();
 
-              chats.add(
+              results.add(
                 ChatSummary(
                   user: user,
                   lastMessage: data['lastMessage'] as String? ?? '',
@@ -451,6 +562,8 @@ class Apis {
                   lastSenderId: data['lastSenderId'] as String? ?? '',
                   hasMessages:
                       (data['lastMessage'] as String? ?? '').isNotEmpty,
+                  isMuted: _computeMuted(data, currentUser.uid),
+                  isArchived: isArchived,
                 ),
               );
             } catch (e) {
@@ -458,12 +571,12 @@ class Apis {
             }
           }
 
-          return chats;
+          return results;
         });
   }
 
   // ======================================================================
-  // BLOCKING & REPORTING
+  // BLOCKING
   // ======================================================================
 
   static Future<void> blockUser(String userId) async {
@@ -494,6 +607,38 @@ class Apis {
               .map((e) => e.toString())
               .toList(),
         );
+  }
+
+  /// Full profiles of everyone I've blocked.
+  static Stream<List<ChatUser>> blockedUsersStream() {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return const Stream.empty();
+
+    return firestore
+        .collection('users')
+        .doc(currentUser.uid)
+        .snapshots()
+        .asyncMap((snap) async {
+          final blockedIds =
+              (snap.data()?['blocked'] as List<dynamic>? ?? const [])
+                  .map((e) => e.toString())
+                  .toList();
+
+          if (blockedIds.isEmpty) return <ChatUser>[];
+
+          final users = <ChatUser>[];
+          for (final id in blockedIds) {
+            try {
+              final doc = await firestore.collection('users').doc(id).get();
+              if (doc.exists) {
+                users.add(ChatUser.fromJson(doc.data()!, doc.id));
+              }
+            } catch (e) {
+              debugPrint('Error loading blocked user $id: $e');
+            }
+          }
+          return users;
+        });
   }
 
   static Future<bool> hasBlocked({required String otherUserId}) async {
@@ -528,16 +673,17 @@ class Apis {
 }
 
 // ======================================================================
-// CHAT SUMMARY MODEL
+// CHAT SUMMARY
 // ======================================================================
 
-/// Represents one row in the home screen chat list.
 class ChatSummary {
   final ChatUser user;
   final String lastMessage;
   final DateTime lastMessageTime;
   final String lastSenderId;
   final bool hasMessages;
+  final bool isMuted;
+  final bool isArchived;
 
   const ChatSummary({
     required this.user,
@@ -545,11 +691,13 @@ class ChatSummary {
     required this.lastMessageTime,
     required this.lastSenderId,
     this.hasMessages = false,
+    this.isMuted = false,
+    this.isArchived = false,
   });
 }
 
 // ======================================================================
-// IMAGE HELPER (kept for backward compatibility)
+// IMAGE HELPER
 // ======================================================================
 
 class ImageHelper {

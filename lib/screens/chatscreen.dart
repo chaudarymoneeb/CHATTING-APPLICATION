@@ -13,8 +13,8 @@ import 'package:chat_app/helper/chat_user.dart';
 import 'package:chat_app/helper/connectivity_helper.dart';
 import 'package:chat_app/models/message_model.dart';
 import 'package:chat_app/models/usermodel.dart';
+import 'package:chat_app/screens/full_screen_image.dart'; // 👈 NAYA IMPORT
 
-import 'package:chat_app/api/cloudinary_cloud/cloudinary.dart'; // ✅ REAL service
 import 'package:chat_app/widgets/audio_message_bubble.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -25,6 +25,15 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+
+enum _ChatMenuAction {
+  viewContact,
+  muteToggle,
+  archiveToggle,
+  clearChat,
+  blockUser,
+  reportUser,
+}
 
 class ChatScreen extends StatefulWidget {
   final ChatUser user;
@@ -53,7 +62,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isUploading = false;
   bool _showEmoji = false;
 
-  // Voice recording state
+  // Chat state
+  bool _isMuted = false;
+  bool _isArchived = false;
+  bool _iBlockedThem = false;
+
+  // Voice recording
   bool _isRecording = false;
   DateTime? _recordStartTime;
   Timer? _recordTimer;
@@ -63,6 +77,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
+    _loadChatState();
     _loadMessages();
     _setupConnectivityListener();
 
@@ -71,6 +86,50 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() => _showEmoji = false);
       }
     });
+  }
+
+  Future<void> _loadChatState() async {
+    final muted = await Apis.isChatMuted(otherUserId: widget.user.id);
+    final archived = await Apis.isChatArchived(otherUserId: widget.user.id);
+    final blocked = await Apis.hasBlocked(otherUserId: widget.user.id);
+
+    if (!mounted) return;
+    setState(() {
+      _isMuted = muted;
+      _isArchived = archived;
+      _iBlockedThem = blocked;
+    });
+  }
+
+  // ============ 👈 NAYA: FULL SCREEN HELPERS ============
+
+  /// Contact ki profile image full screen mein kholo
+  void _openContactPhoto() {
+    final url = widget.user.image.trim();
+    if (url.isEmpty) {
+      _showSnackBar('No profile picture', isSuccess: false);
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FullScreenImage(
+          imageUrl: url,
+          heroTag: 'chat-avatar-${widget.user.id}',
+          senderName: ChatUserHelper.displayName(widget.user),
+        ),
+      ),
+    );
+  }
+
+  /// Chat message ki image full screen mein kholo
+  void _openChatImage({required String imageUrl, required String heroTag}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FullScreenImage(imageUrl: imageUrl, heroTag: heroTag),
+      ),
+    );
   }
 
   // ============ EMOJI ============
@@ -129,6 +188,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ============ SEND TEXT ============
   Future<void> _sendMessage() async {
+    if (_iBlockedThem) {
+      _showSnackBar('You blocked this user', isSuccess: false);
+      return;
+    }
+
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
     if (_isSending) return;
@@ -142,7 +206,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (success) {
         _messageController.clear();
-        // NOTE: no longer unfocusing so the keyboard stays up for chat flow
         if (_showEmoji) setState(() => _showEmoji = false);
         _scrollToBottom();
       } else {
@@ -155,17 +218,16 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // ============ UPLOAD & SEND ATTACHMENT (via Cloudinary) ============
+  // ============ UPLOAD ============
   Future<void> _uploadAndSendFile({
     required File file,
-    required String type, // 'image' | 'document' | 'audio'
+    required String type,
     String? fileName,
   }) async {
     if (_isUploading) return;
     setState(() => _isUploading = true);
 
     try {
-      // Cloudinary needs 'video' resource_type for audio to enable streaming.
       final resourceType = type == 'audio' ? 'video' : 'auto';
 
       final url = await CloudinaryService.uploadFile(
@@ -179,7 +241,6 @@ class _ChatScreenState extends State<ChatScreen> {
         return;
       }
 
-      // Pass fileType / fileUrl / fileName properly so the bubble renders.
       final success = await Apis.sendMessage(
         receiverId: widget.user.id,
         messageText: '',
@@ -401,78 +462,404 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // ============ APP BAR ============
+  // ============ APP BAR (UPDATED — tappable + Hero) ============
   PreferredSizeWidget _buildAppBar() {
+    final avatarUrl = widget.user.image.trim();
+    final hasAvatar = avatarUrl.isNotEmpty;
+
     return AppBar(
       leading: IconButton(
         onPressed: () => Navigator.pop(context),
         icon: const Icon(Icons.arrow_back, color: Colors.white),
       ),
-      title: Row(
-        children: [
-          CircleAvatar(
-            radius: 20,
-            backgroundColor: AppColors.primaryGreen.withValues(alpha: 0.12),
-            backgroundImage: widget.user.image.trim().isNotEmpty
-                ? CachedNetworkImageProvider(
-                    CloudinaryService.thumbnailUrl(widget.user.image),
-                  )
-                : null,
-            child: widget.user.image.trim().isEmpty
-                ? Text(
-                    ChatUserHelper.initials(widget.user),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primaryGreen,
-                    ),
-                  )
-                : null,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  ChatUserHelper.displayName(widget.user),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: widget.user.isOnline
-                            ? AppColors.successColor
-                            : Colors.grey,
-                        shape: BoxShape.circle,
+      titleSpacing: 0,
+      title: InkWell(
+        onTap: hasAvatar ? _openContactPhoto : null,
+        child: Row(
+          children: [
+            Hero(
+              tag: 'chat-avatar-${widget.user.id}',
+              child: CircleAvatar(
+                radius: 20,
+                backgroundColor: AppColors.primaryGreen.withValues(alpha: 0.12),
+                backgroundImage: hasAvatar
+                    ? CachedNetworkImageProvider(
+                        CloudinaryService.thumbnailUrl(avatarUrl),
+                      )
+                    : null,
+                child: hasAvatar
+                    ? null
+                    : Text(
+                        ChatUserHelper.initials(widget.user),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.primaryGreen,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      widget.user.isOnline ? 'Online' : 'Offline',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: widget.user.isOnline
-                            ? AppColors.successColor
-                            : Colors.grey.shade400,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+              ),
             ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    ChatUserHelper.displayName(widget.user),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: widget.user.isOnline
+                              ? AppColors.successColor
+                              : Colors.grey,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        widget.user.isOnline ? 'Online' : 'Offline',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: widget.user.isOnline
+                              ? AppColors.successColor
+                              : Colors.grey.shade400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        IconButton(
+          tooltip: 'Audio call',
+          icon: const Icon(Icons.call_rounded, color: Colors.white),
+          onPressed: () => _showCallPlaceholder('Audio'),
+        ),
+        IconButton(
+          tooltip: 'Video call',
+          icon: const Icon(Icons.videocam_rounded, color: Colors.white),
+          onPressed: () => _showCallPlaceholder('Video'),
+        ),
+        PopupMenuButton<_ChatMenuAction>(
+          icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+          onSelected: (action) => _handleChatMenuAction(action),
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: _ChatMenuAction.viewContact,
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.person_outline_rounded),
+                title: Text('View contact'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _ChatMenuAction.muteToggle,
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  _isMuted ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                ),
+                title: Text(_isMuted ? 'Unmute chat' : 'Mute chat'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _ChatMenuAction.archiveToggle,
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  _isArchived
+                      ? Icons.unarchive_outlined
+                      : Icons.archive_outlined,
+                ),
+                title: Text(_isArchived ? 'Unarchive chat' : 'Archive chat'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: _ChatMenuAction.clearChat,
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.cleaning_services_outlined),
+                title: Text('Clear chat'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: _ChatMenuAction.blockUser,
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.block_rounded),
+                title: Text('Block user'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: _ChatMenuAction.reportUser,
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.flag_outlined),
+                title: Text('Report user'),
+              ),
+            ),
+          ],
+        ),
+      ],
+      backgroundColor: AppColors.primaryGreen,
+    );
+  }
+
+  // ============ CALL PLACEHOLDER ============
+  void _showCallPlaceholder(String kind) {
+    final name = ChatUserHelper.displayName(widget.user);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('$kind call to $name — coming soon'),
+          backgroundColor: AppColors.primaryGreen,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  // ============ POPUP MENU HANDLER ============
+  Future<void> _handleChatMenuAction(_ChatMenuAction action) async {
+    switch (action) {
+      case _ChatMenuAction.viewContact:
+        _showContactSheet();
+        break;
+
+      case _ChatMenuAction.muteToggle:
+        if (_isMuted) {
+          await Apis.unmuteChat(otherUserId: widget.user.id);
+          if (!mounted) return;
+          setState(() => _isMuted = false);
+          _showSnackBar('Chat unmuted', isSuccess: true);
+        } else {
+          final duration = await _showMuteDurationSheet();
+          if (duration == null) return;
+          await Apis.muteChat(otherUserId: widget.user.id, duration: duration);
+          if (!mounted) return;
+          setState(() => _isMuted = true);
+          _showSnackBar('Chat muted', isSuccess: true);
+        }
+        break;
+
+      case _ChatMenuAction.archiveToggle:
+        if (_isArchived) {
+          await Apis.unarchiveChat(otherUserId: widget.user.id);
+          if (!mounted) return;
+          setState(() => _isArchived = false);
+          _showSnackBar('Chat unarchived', isSuccess: true);
+        } else {
+          await Apis.archiveChat(otherUserId: widget.user.id);
+          if (!mounted) return;
+          setState(() => _isArchived = true);
+          _showSnackBar('Chat archived', isSuccess: true);
+        }
+        break;
+
+      case _ChatMenuAction.clearChat:
+        final ok = await _confirmDialog(
+          title: 'Clear this chat?',
+          message: 'Messages will be removed from your view.',
+          confirmLabel: 'Clear',
+          danger: true,
+        );
+        if (ok && mounted) {
+          setState(() => _messages = []);
+          _showSnackBar('Chat cleared', isSuccess: true);
+        }
+        break;
+
+      case _ChatMenuAction.blockUser:
+        final ok = await _confirmDialog(
+          title: 'Block ${ChatUserHelper.displayName(widget.user)}?',
+          message:
+              'You will not receive messages from this user. '
+              'You can unblock them from Settings → Blocked users.',
+          confirmLabel: 'Block',
+          danger: true,
+        );
+        if (!ok) return;
+
+        await Apis.blockUser(widget.user.id);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                '${ChatUserHelper.displayName(widget.user)} blocked',
+              ),
+              backgroundColor: AppColors.successColor,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        Navigator.of(context).pop();
+        break;
+
+      case _ChatMenuAction.reportUser:
+        final ok = await _confirmDialog(
+          title: 'Report ${ChatUserHelper.displayName(widget.user)}?',
+          message: 'Are you sure you want to report this user?',
+          confirmLabel: 'Report',
+          danger: true,
+        );
+        if (ok) {
+          await Apis.reportUser(
+            userId: widget.user.id,
+            reason: 'Reported from chat screen',
+          );
+          if (!mounted) return;
+          _showSnackBar('Reported. Thank you.', isSuccess: true);
+        }
+        break;
+    }
+  }
+
+  Future<Duration?> _showMuteDurationSheet() async {
+    return showModalBottomSheet<Duration>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Mute notifications?', style: AppTextStyles.heading3),
+            const SizedBox(height: 6),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                'You will not receive notifications for this chat.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.textSecondary),
+              ),
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.access_time_rounded),
+              title: const Text('For 8 hours'),
+              onTap: () => Navigator.pop(ctx, const Duration(hours: 8)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_today_rounded),
+              title: const Text('For 1 week'),
+              onTap: () => Navigator.pop(ctx, const Duration(days: 7)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.volume_off_rounded),
+              title: const Text('Always'),
+              onTap: () => Navigator.pop(ctx, Duration.zero),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _confirmDialog({
+    required String title,
+    required String message,
+    required String confirmLabel,
+    bool danger = false,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: danger
+                ? FilledButton.styleFrom(backgroundColor: AppColors.errorColor)
+                : null,
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(confirmLabel),
           ),
         ],
       ),
-      backgroundColor: AppColors.primaryGreen,
+    );
+    return result ?? false;
+  }
+
+  void _showContactSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              ChatUserHelper.displayName(widget.user),
+              style: AppTextStyles.heading3,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              widget.user.email.isEmpty ? 'No email' : widget.user.email,
+              style: AppTextStyles.bodyMedium.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              widget.user.about.isEmpty ? 'No status' : widget.user.about,
+              style: AppTextStyles.bodyMedium,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -540,7 +927,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // ============ MESSAGE CONTENT ============
+  // ============ MESSAGE CONTENT (UPDATED — image tappable + Hero) ============
   Widget _buildMessageContent(Message message, bool isMe) {
     final type = message.fileType;
     final url = message.fileUrl;
@@ -557,18 +944,29 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (type == 'image' && url.isNotEmpty) {
       final thumb = CloudinaryService.previewUrl(url);
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: CachedNetworkImage(
-          imageUrl: thumb,
-          width: 220,
-          fit: BoxFit.cover,
-          placeholder: (c, u) => const SizedBox(
-            width: 220,
-            height: 160,
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      // Unique Hero tag per message
+      final heroTag =
+          'chat-image-${message.senderId}-${message.timestamp.millisecondsSinceEpoch}';
+
+      return GestureDetector(
+        onTap: () => _openChatImage(imageUrl: url, heroTag: heroTag),
+        child: Hero(
+          tag: heroTag,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: CachedNetworkImage(
+              imageUrl: thumb,
+              width: 220,
+              fit: BoxFit.cover,
+              placeholder: (c, u) => const SizedBox(
+                width: 220,
+                height: 160,
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
+              errorWidget: (c, u, e) =>
+                  const Icon(Icons.broken_image, size: 60),
+            ),
           ),
-          errorWidget: (c, u, e) => const Icon(Icons.broken_image, size: 60),
         ),
       );
     }
@@ -626,6 +1024,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ============ INPUT ============
   Widget _buildMessageInput() {
+    if (_iBlockedThem) return _buildBlockedBanner();
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -694,7 +1094,6 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               const SizedBox(width: 4),
 
-              // ✅ FIX: rebuild the send/mic button whenever the text changes
               ValueListenableBuilder<TextEditingValue>(
                 valueListenable: _messageController,
                 builder: (context, value, _) {
@@ -730,8 +1129,6 @@ class _ChatScreenState extends State<ChatScreen> {
                               ),
                             )
                           : Icon(
-                              // Show Send when typing OR recording,
-                              // otherwise show Mic.
                               showSend
                                   ? (_isRecording
                                         ? Icons.stop
@@ -795,6 +1192,29 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildBlockedBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      color: AppColors.errorColor.withValues(alpha: 0.08),
+      child: Row(
+        children: [
+          const Icon(Icons.block_rounded, color: AppColors.errorColor),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'You blocked this contact. Unblock them from '
+              'Settings → Blocked users to send messages.',
+              style: TextStyle(
+                color: AppColors.errorColor,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -6,13 +6,17 @@ import 'package:chat_app/api/api.dart';
 import 'package:chat_app/app_constant.dart';
 import 'package:chat_app/helper/chat_user.dart';
 import 'package:chat_app/models/usermodel.dart';
+import 'package:chat_app/screens/archived_screen.dart';
 import 'package:chat_app/screens/chatscreen.dart';
+import 'package:chat_app/screens/new_group_screen.dart';
 import 'package:chat_app/screens/profile_screen.dart';
+import 'package:chat_app/screens/settings_screen.dart';
+import 'package:chat_app/screens/starred_screen.dart';
 import 'package:chat_app/screens/user_picker_screen.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-enum _HomeMenuAction { profile, about }
+enum _HomeMenuAction { profile, newGroup, starred, archived, settings, about }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -25,6 +29,10 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   bool _isSearchVisible = false;
+
+  // Selection mode
+  final Set<String> _selectedChatIds = <String>{};
+  bool get _isSelectionMode => _selectedChatIds.isNotEmpty;
 
   @override
   void initState() {
@@ -58,31 +66,155 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isSearchVisible = false);
   }
 
+  void _toggleSelection(String chatId) {
+    setState(() {
+      if (_selectedChatIds.contains(chatId)) {
+        _selectedChatIds.remove(chatId);
+      } else {
+        _selectedChatIds.add(chatId);
+      }
+    });
+  }
+
+  void _exitSelection() {
+    setState(() => _selectedChatIds.clear());
+  }
+
+  // ========== SELECTION ACTIONS ==========
+
+  Future<void> _muteSelected(List<ChatSummary> chats, bool mute) async {
+    final targets = chats
+        .where((c) => _selectedChatIds.contains(c.user.id))
+        .toList();
+    if (targets.isEmpty) return;
+    _exitSelection();
+
+    if (mute) {
+      final duration = await _showMuteDurationSheet();
+      if (duration == null) return; // cancelled
+      for (final c in targets) {
+        await Apis.muteChat(otherUserId: c.user.id, duration: duration);
+      }
+      if (!mounted) return;
+      _snack('Chat muted');
+    } else {
+      for (final c in targets) {
+        await Apis.unmuteChat(otherUserId: c.user.id);
+      }
+      if (!mounted) return;
+      _snack('Chat unmuted');
+    }
+  }
+
+  Future<void> _archiveSelected(List<ChatSummary> chats) async {
+    final targets = chats
+        .where((c) => _selectedChatIds.contains(c.user.id))
+        .toList();
+    if (targets.isEmpty) return;
+    _exitSelection();
+
+    for (final c in targets) {
+      await Apis.archiveChat(otherUserId: c.user.id);
+    }
+    if (!mounted) return;
+    _snack('${targets.length} chat(s) archived');
+  }
+
+  /// Returns null if user cancels; Duration.zero = "Always"; other = timed.
+  Future<Duration?> _showMuteDurationSheet() async {
+    return showModalBottomSheet<Duration>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Mute notifications?', style: AppTextStyles.heading3),
+            const SizedBox(height: 6),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                'You will not receive notifications for this chat.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.textSecondary),
+              ),
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.access_time_rounded),
+              title: const Text('For 8 hours'),
+              onTap: () => Navigator.pop(ctx, const Duration(hours: 8)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_today_rounded),
+              title: const Text('For 1 week'),
+              onTap: () => Navigator.pop(ctx, const Duration(days: 7)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.volume_off_rounded),
+              title: const Text('Always'),
+              onTap: () => Navigator.pop(ctx, Duration.zero),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _snack(String msg) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: AppColors.successColor,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: _buildAppBar(),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.of(
-            context,
-          ).push(MaterialPageRoute(builder: (_) => const UserPickerScreen()));
-        },
-        backgroundColor: AppColors.primaryGreen,
-        foregroundColor: Colors.white,
-        elevation: 3,
-        icon: const Icon(Icons.person_add_alt_1_rounded),
-        label: const Text('New chat'),
-      ),
+      appBar: _isSelectionMode ? _buildSelectionAppBar() : _buildAppBar(),
+      floatingActionButton: _isSelectionMode
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const UserPickerScreen()),
+                );
+              },
+              backgroundColor: AppColors.primaryGreen,
+              foregroundColor: Colors.white,
+              elevation: 3,
+              icon: const Icon(Icons.person_add_alt_1_rounded),
+              label: const Text('Add contact'),
+            ),
       body: Column(
         children: [
-          if (_isSearchVisible) _buildSearchBar(),
+          if (_isSearchVisible && !_isSelectionMode) _buildSearchBar(),
           Expanded(child: _buildChatList()),
         ],
       ),
     );
   }
 
+  // ========== NORMAL APP BAR ==========
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       toolbarHeight: 68,
@@ -122,6 +254,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ProfileScreen()),
                 );
+              case _HomeMenuAction.newGroup:
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NewGroupScreen()),
+                );
+              case _HomeMenuAction.starred:
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const StarredScreen()),
+                );
+              case _HomeMenuAction.archived:
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ArchivedScreen()),
+                );
+              case _HomeMenuAction.settings:
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
               case _HomeMenuAction.about:
                 _showAboutDialog();
             }
@@ -135,10 +283,144 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             PopupMenuItem(
+              value: _HomeMenuAction.newGroup,
+              child: _MenuItem(
+                icon: Icons.group_add_outlined,
+                label: 'New group',
+              ),
+            ),
+            PopupMenuItem(
+              value: _HomeMenuAction.starred,
+              child: _MenuItem(
+                icon: Icons.star_outline_rounded,
+                label: 'Starred',
+              ),
+            ),
+            PopupMenuItem(
+              value: _HomeMenuAction.archived,
+              child: _MenuItem(icon: Icons.archive_outlined, label: 'Archived'),
+            ),
+            PopupMenuItem(
+              value: _HomeMenuAction.settings,
+              child: _MenuItem(
+                icon: Icons.settings_outlined,
+                label: 'Settings',
+              ),
+            ),
+            PopupMenuItem(
               value: _HomeMenuAction.about,
               child: _MenuItem(
                 icon: Icons.info_outline_rounded,
                 label: 'About We Chat',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 4),
+      ],
+    );
+  }
+
+  // ========== SELECTION APP BAR ==========
+  PreferredSizeWidget _buildSelectionAppBar() {
+    final chats = _lastLoadedChats;
+    final selected = chats
+        .where((c) => _selectedChatIds.contains(c.user.id))
+        .toList();
+
+    // Are ALL selected chats already muted?
+    final allMuted = selected.isNotEmpty && selected.every((c) => c.isMuted);
+
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.close_rounded, color: Colors.white),
+        onPressed: _exitSelection,
+      ),
+      title: Text(
+        '${_selectedChatIds.length} selected',
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      backgroundColor: AppColors.primaryGreen,
+      actions: [
+        IconButton(
+          tooltip: allMuted ? 'Unmute' : 'Mute',
+          icon: Icon(
+            allMuted ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+            color: Colors.white,
+          ),
+          onPressed: () => _muteSelected(chats, !allMuted),
+        ),
+        IconButton(
+          tooltip: 'Archive',
+          icon: const Icon(Icons.archive_outlined, color: Colors.white),
+          onPressed: () => _archiveSelected(chats),
+        ),
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+          onSelected: (action) async {
+            switch (action) {
+              case 'markRead':
+                _snack('Marked as read');
+                _exitSelection();
+                break;
+              case 'markUnread':
+                _snack('Marked as unread');
+                _exitSelection();
+                break;
+              case 'selectAll':
+                setState(() {
+                  for (final c in chats) {
+                    _selectedChatIds.add(c.user.id);
+                  }
+                });
+                break;
+              case 'clear':
+                _snack('Chat cleared');
+                _exitSelection();
+                break;
+              case 'delete':
+                _snack('Deleted');
+                _exitSelection();
+                break;
+            }
+          },
+          itemBuilder: (context) => const [
+            PopupMenuItem(
+              value: 'markRead',
+              child: _MenuItem(
+                icon: Icons.done_all_rounded,
+                label: 'Mark as read',
+              ),
+            ),
+            PopupMenuItem(
+              value: 'markUnread',
+              child: _MenuItem(
+                icon: Icons.mark_chat_unread_outlined,
+                label: 'Mark as unread',
+              ),
+            ),
+            PopupMenuItem(
+              value: 'selectAll',
+              child: _MenuItem(
+                icon: Icons.select_all_rounded,
+                label: 'Select all',
+              ),
+            ),
+            PopupMenuItem(
+              value: 'clear',
+              child: _MenuItem(
+                icon: Icons.cleaning_services_outlined,
+                label: 'Clear chat',
+              ),
+            ),
+            PopupMenuItem(
+              value: 'delete',
+              child: _MenuItem(
+                icon: Icons.delete_outline_rounded,
+                label: 'Delete chat',
               ),
             ),
           ],
@@ -189,7 +471,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ============ CHAT LIST (NEW) ============
+  // Cache last loaded chats so selection toolbar can read mute state
+  List<ChatSummary> _lastLoadedChats = const [];
+
+  // ============ CHAT LIST ============
   Widget _buildChatList() {
     return StreamBuilder<List<ChatSummary>>(
       stream: Apis.getMyChatsStream(),
@@ -206,6 +491,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         final chats = snapshot.data ?? [];
+        _lastLoadedChats = chats;
 
         final visibleChats = chats
             .where(
@@ -223,14 +509,24 @@ class _HomeScreenState extends State<HomeScreen> {
           separatorBuilder: (_, _) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
             final chat = visibleChats[index];
+            final selected = _selectedChatIds.contains(chat.user.id);
             return _ChatTile(
               chat: chat,
+              isSelected: selected,
+              isSelectionMode: _isSelectionMode,
               onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => ChatScreen(user: chat.user),
-                  ),
-                );
+                if (_isSelectionMode) {
+                  _toggleSelection(chat.user.id);
+                } else {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(user: chat.user),
+                    ),
+                  );
+                }
+              },
+              onLongPress: () {
+                _toggleSelection(chat.user.id);
               },
             );
           },
@@ -242,7 +538,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildEmptyState() => const _StatusPanel(
     icon: CupertinoIcons.chat_bubble_2,
     title: 'No chats yet',
-    message: 'Tap "New chat" to add someone and start a conversation.',
+    message: 'Tap "Add contact" to add someone and start a conversation.',
   );
 
   Widget _buildNoResultsState() => _StatusPanel(
@@ -277,14 +573,23 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ======================================================================
-// CHAT TILE WIDGET
+// CHAT TILE
 // ======================================================================
 
 class _ChatTile extends StatelessWidget {
-  const _ChatTile({required this.chat, required this.onTap});
+  const _ChatTile({
+    required this.chat,
+    required this.onTap,
+    required this.onLongPress,
+    this.isSelected = false,
+    this.isSelectionMode = false,
+  });
 
   final ChatSummary chat;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final bool isSelected;
+  final bool isSelectionMode;
 
   @override
   Widget build(BuildContext context) {
@@ -299,16 +604,33 @@ class _ChatTile extends StatelessWidget {
         ? 'Tap to start chatting'
         : chat.user.about;
 
+    final bg = isSelected
+        ? AppColors.primaryGreen.withValues(alpha: 0.12)
+        : AppColors.cardBackground;
+
     return Material(
-      color: AppColors.cardBackground,
+      color: bg,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(18),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
+              if (isSelectionMode) ...[
+                Icon(
+                  isSelected
+                      ? Icons.check_circle
+                      : Icons.radio_button_unchecked,
+                  color: isSelected
+                      ? AppColors.primaryGreen
+                      : Colors.grey.shade400,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+              ],
               _OnlineAvatar(
                 imageUrl: chat.user.image,
                 initials: ChatUserHelper.initials(chat.user),
@@ -320,13 +642,27 @@ class _ChatTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.bodyLarge.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.bodyLarge.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (chat.isMuted) ...[
+                          const SizedBox(width: 6),
+                          Icon(
+                            Icons.volume_off_rounded,
+                            size: 16,
+                            color: AppColors.textSecondary,
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -369,7 +705,7 @@ class _ChatTile extends StatelessWidget {
 }
 
 // ======================================================================
-// ONLINE AVATAR (inline mini version)
+// ONLINE AVATAR
 // ======================================================================
 
 class _OnlineAvatar extends StatelessWidget {
@@ -441,7 +777,7 @@ class _OnlineAvatar extends StatelessWidget {
 }
 
 // ======================================================================
-// HELPER WIDGETS
+// HELPERS
 // ======================================================================
 
 class _MenuItem extends StatelessWidget {
