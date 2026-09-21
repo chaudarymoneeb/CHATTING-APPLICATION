@@ -280,7 +280,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
   }
 
-  // 👈 NAYA METHOD: Full screen image kholne ke liye
+  // 👈 Full screen image kholne ke liye (✅ FIXED: heroTag passed)
   void _openFullScreenImage() {
     final hasBase64 = _profileImageBase64.isNotEmpty;
     final hasUrl = (_currentUser?.photoURL?.trim().isNotEmpty ?? false);
@@ -296,6 +296,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         builder: (_) => FullScreenImage(
           imageBase64: _profileImageBase64,
           imageUrl: _currentUser?.photoURL,
+          heroTag: 'profile-avatar', // ✅ MUST match _ProfileAvatar's Hero tag
         ),
       ),
     );
@@ -776,20 +777,20 @@ class _ProfileField extends StatelessWidget {
 }
 
 // ============================================
-// _ProfileAvatar (UPDATED)
+// _ProfileAvatar (UPDATED — Hero tag matches FullScreenImage)
 // ============================================
 class _ProfileAvatar extends StatelessWidget {
   const _ProfileAvatar({
     required this.user,
     required this.name,
     required this.imageBase64,
-    this.onTap, // 👈 NAYA
+    this.onTap,
   });
 
   final User user;
   final String name;
   final String imageBase64;
-  final VoidCallback? onTap; // 👈 NAYA
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -842,9 +843,9 @@ class _ProfileAvatar extends StatelessWidget {
     }
 
     return GestureDetector(
-      onTap: onTap, // 👈 TAP HANDLE
+      onTap: onTap,
       child: Hero(
-        tag: 'profile-avatar', // 👈 SMOOTH ANIMATION
+        tag: 'profile-avatar', // ✅ matches FullScreenImage heroTag
         child: Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(

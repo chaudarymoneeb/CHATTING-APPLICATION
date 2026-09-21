@@ -58,3 +58,13 @@ class AppTextStyles {
     color: AppColors.textSecondary,
   );
 }
+
+// ============================================
+// 📞 ZEGOCLOUD CONSTANTS
+// ============================================
+class AppConstants {
+  // ZEGOCLOUD Console se copy karo: https://console.zegocloud.com
+  static const int zegoAppId = 2115226072; // 👈 apna AppID (integer) yahan
+  static const String zegoAppSign =
+      'e2d978f7b761bdf0e43010904b1c60a0be849dc9762e797fc7f9498a04a6cb45'; // 👈 apna AppSign yahan
+}

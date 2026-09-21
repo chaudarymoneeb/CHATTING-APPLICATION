@@ -35,15 +35,24 @@ dependencies:
   google_sign_in: ^7.2.0
 
   # Media
-  cached_network_image: ^4.0.0
+  # Keep aligned with zego_uikit_prebuilt_call's transitive dependency requirements.
+  cached_network_image: ^3.4.1
   image_picker: ^1.2.3
-  file_picker: ^13.1.0
+  file_picker: ^10.3.8  # ✅ DOWNGRADED to match zego_uikit dependency
 
   # Connectivity
-  connectivity_plus: ^7.3.1
+  # Keep aligned with zego_uikit_prebuilt_call's transitive dependency requirements.
+  connectivity_plus: ^6.1.0
 
   # Local database
   sqflite: ^2.3.0
+
+  # ============================================
+  # 📞 AUDIO / VIDEO CALL (ZEGOCLOUD)
+  # ============================================
+  zego_uikit_prebuilt_call: ^4.24.4
+  zego_uikit_signaling_plugin: ^2.8.21
+  zego_uikit: ^2.29.2
 
 dev_dependencies:
   flutter_test:

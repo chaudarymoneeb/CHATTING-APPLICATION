@@ -13,7 +13,7 @@ import 'package:chat_app/helper/chat_user.dart';
 import 'package:chat_app/helper/connectivity_helper.dart';
 import 'package:chat_app/models/message_model.dart';
 import 'package:chat_app/models/usermodel.dart';
-import 'package:chat_app/screens/full_screen_image.dart'; // 👈 NAYA IMPORT
+import 'package:chat_app/screens/full_screen_image.dart';
 
 import 'package:chat_app/widgets/audio_message_bubble.dart';
 
@@ -25,6 +25,11 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:zego_uikit/zego_uikit.dart';
+
+// ✅ ZEGOCLOUD import
+import 'package:zego_uikit/zego_uikit.dart';
+import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 
 enum _ChatMenuAction {
   viewContact,
@@ -101,9 +106,8 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  // ============ 👈 NAYA: FULL SCREEN HELPERS ============
+  // ============ FULL SCREEN HELPERS ============
 
-  /// Contact ki profile image full screen mein kholo
   void _openContactPhoto() {
     final url = widget.user.image.trim();
     if (url.isEmpty) {
@@ -122,7 +126,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  /// Chat message ki image full screen mein kholo
   void _openChatImage({required String imageUrl, required String heroTag}) {
     Navigator.push(
       context,
@@ -300,10 +303,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _pickDocument() async {
     try {
-      final result = await FilePicker.pickFiles(type: FileType.any);
-      if (result == null || result.isEmpty) return;
+      final result = await FilePicker.platform.pickFiles(type: FileType.any);
+      if (result == null || result.files.isEmpty) return;
 
-      final file = result.first;
+      final file = result.files.first;
       final path = file.path;
       if (path == null) return;
 
@@ -462,7 +465,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // ============ APP BAR (UPDATED — tappable + Hero) ============
+  // ============ APP BAR (ZEGOCLOUD CALL BUTTONS) ============
   PreferredSizeWidget _buildAppBar() {
     final avatarUrl = widget.user.image.trim();
     final hasAvatar = avatarUrl.isNotEmpty;
@@ -544,16 +547,32 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
       actions: [
-        IconButton(
-          tooltip: 'Audio call',
-          icon: const Icon(Icons.call_rounded, color: Colors.white),
-          onPressed: () => _showCallPlaceholder('Audio'),
+        // ============================================
+        // 📞 AUDIO CALL BUTTON (ZEGOCLOUD)
+        // ============================================
+        ZegoSendCallInvitationButton(
+          isVideoCall: false,
+          invitees: [
+            ZegoUIKitUser(
+              id: widget.user.id,
+              name: ChatUserHelper.displayName(widget.user),
+            ),
+          ],
         ),
-        IconButton(
-          tooltip: 'Video call',
-          icon: const Icon(Icons.videocam_rounded, color: Colors.white),
-          onPressed: () => _showCallPlaceholder('Video'),
+
+        // ============================================
+        // 📹 VIDEO CALL BUTTON (ZEGOCLOUD)
+        // ============================================
+        ZegoSendCallInvitationButton(
+          isVideoCall: true,
+          invitees: [
+            ZegoUIKitUser(
+              id: widget.user.id,
+              name: ChatUserHelper.displayName(widget.user),
+            ),
+          ],
         ),
+
         PopupMenuButton<_ChatMenuAction>(
           icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
           onSelected: (action) => _handleChatMenuAction(action),
@@ -623,20 +642,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ],
       backgroundColor: AppColors.primaryGreen,
     );
-  }
-
-  // ============ CALL PLACEHOLDER ============
-  void _showCallPlaceholder(String kind) {
-    final name = ChatUserHelper.displayName(widget.user);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('$kind call to $name — coming soon'),
-          backgroundColor: AppColors.primaryGreen,
-          duration: const Duration(seconds: 2),
-        ),
-      );
   }
 
   // ============ POPUP MENU HANDLER ============
@@ -927,7 +932,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // ============ MESSAGE CONTENT (UPDATED — image tappable + Hero) ============
   Widget _buildMessageContent(Message message, bool isMe) {
     final type = message.fileType;
     final url = message.fileUrl;
@@ -944,7 +948,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (type == 'image' && url.isNotEmpty) {
       final thumb = CloudinaryService.previewUrl(url);
-      // Unique Hero tag per message
       final heroTag =
           'chat-image-${message.senderId}-${message.timestamp.millisecondsSinceEpoch}';
 

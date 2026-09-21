@@ -26,6 +26,24 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+
+	<!-- ============================================ -->
+	<!-- 📞 ZEGOCLOUD / AUDIO + VIDEO CALL PERMISSIONS -->
+	<!-- ============================================ -->
+	<key>NSCameraUsageDescription</key>
+	<string>Video calls ke liye camera access chahiye</string>
+
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Audio calls aur voice messages ke liye microphone access chahiye</string>
+
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Profile picture aur chat images bhejne ke liye photo library access chahiye</string>
+
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Images ko save karne ke liye photo library access chahiye</string>
+
+	<!-- ============================================ -->
+
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -8,7 +8,7 @@ class FullScreenImage extends StatelessWidget {
   final String? imageUrl;
   final File? imageFile;
   final String heroTag; // unique tag for Hero animation
-  final String? senderName; // optional: WhatsApp jaisa top pe naam
+  final String? senderName; // optional: name shown on top
 
   const FullScreenImage({
     super.key,
@@ -34,7 +34,9 @@ class FullScreenImage extends StatelessWidget {
               )
             : null,
       ),
-      body: Center(
+      // ✅ FIX: SizedBox.expand forces full-screen tight constraints
+      // so the image fills the whole screen instead of a tiny centered box.
+      body: SizedBox.expand(
         child: Hero(
           tag: heroTag,
           child: InteractiveViewer(
@@ -49,21 +51,38 @@ class FullScreenImage extends StatelessWidget {
 
   Widget _buildImage() {
     // Priority: File > Base64 > URL
+
     if (imageFile != null) {
-      return Image.file(imageFile!, fit: BoxFit.contain);
+      return Image.file(
+        imageFile!,
+        fit: BoxFit.contain,
+        width: double.infinity, // ✅ fill width
+        height: double.infinity, // ✅ fill height
+      );
     }
 
     if (imageBase64 != null && imageBase64!.isNotEmpty) {
       try {
         final bytes = base64Decode(imageBase64!);
-        return Image.memory(bytes, fit: BoxFit.contain);
-      } catch (_) {}
+        return Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          width: double.infinity,
+          height: double.infinity,
+          errorBuilder: (_, __, ___) =>
+              const Icon(Icons.broken_image, color: Colors.white, size: 120),
+        );
+      } catch (_) {
+        // fall through to URL / placeholder
+      }
     }
 
     if (imageUrl != null && imageUrl!.isNotEmpty) {
       return CachedNetworkImage(
         imageUrl: imageUrl!,
         fit: BoxFit.contain,
+        width: double.infinity,
+        height: double.infinity,
         placeholder: (_, __) =>
             const Center(child: CircularProgressIndicator(color: Colors.white)),
         errorWidget: (_, __, ___) =>
