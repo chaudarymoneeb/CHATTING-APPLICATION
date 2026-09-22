@@ -19,60 +19,73 @@ class ChatUserCard extends StatelessWidget {
       button: true,
       label: '$name, $statusText',
       child: Material(
-        color: AppColors.cardBackground,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          onTap: () {
-            Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => ChatScreen(user: user)));
-          },
-          borderRadius: BorderRadius.circular(18),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                OnlineAvatar(
-                  imageUrl: user.image,
-                  initials: ChatUserHelper.initials(user),
-                  isOnline: user.isOnline,
-                  radius: 28,
-                  badgeBorderColor: AppColors.cardBackground,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.bodyLarge.copyWith(
-                          fontWeight: FontWeight.w700,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: AppColors.cardBackground,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: InkWell(
+            onTap: () {
+              Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => ChatScreen(user: user)));
+            },
+            borderRadius: BorderRadius.circular(18),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  OnlineAvatar(
+                    imageUrl: user.image,
+                    initials: ChatUserHelper.initials(user),
+                    isOnline: user.isOnline,
+                    radius: 28,
+                    badgeBorderColor: AppColors.cardBackground,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodyLarge.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        user.about.trim().isEmpty
-                            ? 'Hey! I\'m using We Chat'
-                            : user.about,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.bodySmall.copyWith(fontSize: 13),
-                      ),
-                    ],
+                        const SizedBox(height: 4),
+                        Text(
+                          user.about.trim().isEmpty
+                              ? 'Hey! I\'m using We Chat'
+                              : user.about,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodySmall.copyWith(fontSize: 13),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  _formatLastMessageTime(user),
-                  style: AppTextStyles.bodySmall.copyWith(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
+                  const SizedBox(width: 8),
+                  Text(
+                    _formatLastMessageTime(user),
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

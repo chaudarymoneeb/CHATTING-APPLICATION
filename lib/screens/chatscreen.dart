@@ -1,6 +1,6 @@
 // lib/screens/chat_screen.dart
 
-// ignore_for_file: duplicate_import, unnecessary_null_comparison, deprecated_member_use, file_names, avoid_print
+// ignore_for_file: unrelated_type_equality_checks, duplicate_import, unnecessary_null_comparison, deprecated_member_use, file_names, avoid_print
 
 import 'dart:async';
 import 'dart:io';
@@ -14,8 +14,9 @@ import 'package:chat_app/helper/connectivity_helper.dart';
 import 'package:chat_app/models/message_model.dart';
 import 'package:chat_app/models/usermodel.dart';
 import 'package:chat_app/screens/full_screen_image.dart';
-
+import 'package:chat_app/services/call_log_service.dart'; // 📞 NEW
 import 'package:chat_app/widgets/audio_message_bubble.dart';
+import 'package:chat_app/widgets/gradient_appbar.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
@@ -25,9 +26,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
-import 'package:zego_uikit/zego_uikit.dart';
 
-// ✅ ZEGOCLOUD import
+// ✅ ZEGOCLOUD imports
 import 'package:zego_uikit/zego_uikit.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 
@@ -161,6 +161,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _listenToFirebase() {
     _messagesSubscription?.cancel();
+    Apis.markMessagesAsDelivered(widget.user.id);
+    Apis.markMessagesAsRead(widget.user.id);
     _messagesSubscription =
         Apis.getMessagesStream(
           currentUserId: _currentUserId,
@@ -392,45 +394,63 @@ class _ChatScreenState extends State<ChatScreen> {
   void _showAttachmentSheet() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildAttachmentOption(
-                  icon: Icons.photo_library,
-                  label: 'Gallery',
-                  color: Colors.purple,
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _pickFromGallery();
-                  },
-                ),
-                _buildAttachmentOption(
-                  icon: Icons.camera_alt,
-                  label: 'Camera',
-                  color: Colors.blue,
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _pickFromCamera();
-                  },
-                ),
-                _buildAttachmentOption(
-                  icon: Icons.description,
-                  label: 'Document',
-                  color: Colors.orange,
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _pickDocument();
-                  },
-                ),
-              ],
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _buildAttachmentOption(
+                        icon: Icons.photo_library_rounded,
+                        label: 'Gallery',
+                        color: Colors.purple,
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _pickFromGallery();
+                        },
+                      ),
+                      _buildAttachmentOption(
+                        icon: Icons.camera_alt_rounded,
+                        label: 'Camera',
+                        color: Colors.blue,
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _pickFromCamera();
+                        },
+                      ),
+                      _buildAttachmentOption(
+                        icon: Icons.description_rounded,
+                        label: 'Document',
+                        color: Colors.orange,
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _pickDocument();
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
           ),
         );
@@ -446,19 +466,39 @@ class _ChatScreenState extends State<ChatScreen> {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(16),
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(
-              radius: 28,
-              backgroundColor: color.withValues(alpha: 0.15),
-              child: Icon(icon, color: color, size: 28),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    color.withValues(alpha: 0.9),
+                    color.withValues(alpha: 0.7),
+                  ],
+                ),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.35),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Icon(icon, color: Colors.white, size: 26),
             ),
             const SizedBox(height: 8),
-            Text(label),
+            Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
           ],
         ),
       ),
@@ -466,17 +506,50 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ============ APP BAR (ZEGOCLOUD CALL BUTTONS) ============
+  Future<bool> _canStartCall() async {
+    if (!ZegoUIKitPrebuiltCallInvitationService().isInit) {
+      _showSnackBar(
+        'Calling is still starting. Please try again in a moment.',
+        isSuccess: false,
+      );
+      return false;
+    }
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null || currentUser.uid.isEmpty) {
+      _showSnackBar(
+        'You must be signed in before starting a call.',
+        isSuccess: false,
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  void _showCallFailure(String callType, String code, String message) {
+    debugPrint('$callType call -> code:$code message:$message');
+    if (code.isEmpty) return;
+
+    final failureMessage = code == '1070'
+        ? 'Call failed: the other user is not registered with ZEGO. '
+              'Ask them to open the app and sign in first.'
+        : 'Call failed: ${message.isEmpty ? 'error $code' : message}';
+    _showSnackBar(failureMessage, isSuccess: false);
+  }
+
   PreferredSizeWidget _buildAppBar() {
     final avatarUrl = widget.user.image.trim();
     final hasAvatar = avatarUrl.isNotEmpty;
+    final String userName = ChatUserHelper.displayName(widget.user);
 
-    return AppBar(
+    return GradientAppBar(
+      toolbarHeight: 68,
       leading: IconButton(
         onPressed: () => Navigator.pop(context),
         icon: const Icon(Icons.arrow_back, color: Colors.white),
       ),
-      titleSpacing: 0,
-      title: InkWell(
+      titleWidget: InkWell(
         onTap: hasAvatar ? _openContactPhoto : null,
         child: Row(
           children: [
@@ -484,7 +557,7 @@ class _ChatScreenState extends State<ChatScreen> {
               tag: 'chat-avatar-${widget.user.id}',
               child: CircleAvatar(
                 radius: 20,
-                backgroundColor: AppColors.primaryGreen.withValues(alpha: 0.12),
+                backgroundColor: Colors.white.withValues(alpha: 0.22),
                 backgroundImage: hasAvatar
                     ? CachedNetworkImageProvider(
                         CloudinaryService.thumbnailUrl(avatarUrl),
@@ -508,12 +581,13 @@ class _ChatScreenState extends State<ChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    ChatUserHelper.displayName(widget.user),
+                    userName,
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 2),
                   Row(
@@ -534,8 +608,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         style: TextStyle(
                           fontSize: 12,
                           color: widget.user.isOnline
-                              ? AppColors.successColor
-                              : Colors.grey.shade400,
+                              ? Colors.white
+                              : Colors.white70,
                         ),
                       ),
                     ],
@@ -547,34 +621,82 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
       actions: [
-        // ============================================
-        // 📞 AUDIO CALL BUTTON (ZEGOCLOUD)
-        // ============================================
-        ZegoSendCallInvitationButton(
-          isVideoCall: false,
-          invitees: [
-            ZegoUIKitUser(
-              id: widget.user.id,
-              name: ChatUserHelper.displayName(widget.user),
+        // 📞 AUDIO CALL
+        SizedBox(
+          width: 40,
+          height: 40,
+          child: Center(
+            child: ZegoSendCallInvitationButton(
+              isVideoCall: false,
+              invitees: [ZegoUIKitUser(id: widget.user.id, name: userName)],
+              onWillPressed: _canStartCall,
+              buttonSize: const Size(36, 36),
+              iconSize: const Size(22, 22),
+              icon: ButtonIcon(
+                icon: const Icon(
+                  Icons.call_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+              text: '',
+              padding: EdgeInsets.zero,
+              onPressed: (code, message, invitees) {
+                _showCallFailure('Audio', code, message);
+                // 📞 LOG CALL INITIATED
+                if (code == '0') {
+                  CallLogService.instance.onCallInitiated(
+                    receiverId: widget.user.id,
+                    receiverName: userName,
+                    isVideo: false,
+                  );
+                }
+              },
             ),
-          ],
+          ),
         ),
 
-        // ============================================
-        // 📹 VIDEO CALL BUTTON (ZEGOCLOUD)
-        // ============================================
-        ZegoSendCallInvitationButton(
-          isVideoCall: true,
-          invitees: [
-            ZegoUIKitUser(
-              id: widget.user.id,
-              name: ChatUserHelper.displayName(widget.user),
+        // 📹 VIDEO CALL
+        SizedBox(
+          width: 40,
+          height: 40,
+          child: Center(
+            child: ZegoSendCallInvitationButton(
+              isVideoCall: true,
+              invitees: [ZegoUIKitUser(id: widget.user.id, name: userName)],
+              onWillPressed: _canStartCall,
+              buttonSize: const Size(36, 36),
+              iconSize: const Size(22, 22),
+              icon: ButtonIcon(
+                icon: const Icon(
+                  Icons.videocam_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+              text: '',
+              padding: EdgeInsets.zero,
+              onPressed: (code, message, invitees) {
+                _showCallFailure('Video', code, message);
+                // 📞 LOG CALL INITIATED
+                if (code == '0') {
+                  CallLogService.instance.onCallInitiated(
+                    receiverId: widget.user.id,
+                    receiverName: userName,
+                    isVideo: true,
+                  );
+                }
+              },
             ),
-          ],
+          ),
         ),
 
+        // ⋮ THREE DOT MENU
         PopupMenuButton<_ChatMenuAction>(
           icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           onSelected: (action) => _handleChatMenuAction(action),
           itemBuilder: (context) => [
             const PopupMenuItem(
@@ -639,8 +761,8 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ],
         ),
+        const SizedBox(width: 4),
       ],
-      backgroundColor: AppColors.primaryGreen,
     );
   }
 
@@ -715,6 +837,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 '${ChatUserHelper.displayName(widget.user)} blocked',
               ),
               backgroundColor: AppColors.successColor,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               duration: const Duration(seconds: 2),
             ),
           );
@@ -743,52 +869,55 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<Duration?> _showMuteDurationSheet() async {
     return showModalBottomSheet<Duration>(
       context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text('Mute notifications?', style: AppTextStyles.heading3),
-            const SizedBox(height: 6),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                'You will not receive notifications for this chat.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textSecondary),
+              const SizedBox(height: 16),
+              const Text('Mute notifications?', style: AppTextStyles.heading3),
+              const SizedBox(height: 6),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  'You will not receive notifications for this chat.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            ListTile(
-              leading: const Icon(Icons.access_time_rounded),
-              title: const Text('For 8 hours'),
-              onTap: () => Navigator.pop(ctx, const Duration(hours: 8)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.calendar_today_rounded),
-              title: const Text('For 1 week'),
-              onTap: () => Navigator.pop(ctx, const Duration(days: 7)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.volume_off_rounded),
-              title: const Text('Always'),
-              onTap: () => Navigator.pop(ctx, Duration.zero),
-            ),
-            const SizedBox(height: 8),
-          ],
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.access_time_rounded),
+                title: const Text('For 8 hours'),
+                onTap: () => Navigator.pop(ctx, const Duration(hours: 8)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_today_rounded),
+                title: const Text('For 1 week'),
+                onTap: () => Navigator.pop(ctx, const Duration(days: 7)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.volume_off_rounded),
+                title: const Text('Always'),
+                onTap: () => Navigator.pop(ctx, Duration.zero),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -803,6 +932,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(title),
         content: Text(message),
         actions: [
@@ -813,7 +943,9 @@ class _ChatScreenState extends State<ChatScreen> {
           FilledButton(
             style: danger
                 ? FilledButton.styleFrom(backgroundColor: AppColors.errorColor)
-                : null,
+                : FilledButton.styleFrom(
+                    backgroundColor: AppColors.primaryGreen,
+                  ),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(confirmLabel),
           ),
@@ -826,10 +958,12 @@ class _ChatScreenState extends State<ChatScreen> {
   void _showContactSheet() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => Padding(
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -888,7 +1022,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 maxWidth: MediaQuery.of(context).size.width * 0.75,
               ),
               decoration: BoxDecoration(
-                color: isMe ? AppColors.primaryGreen : AppColors.cardBackground,
+                gradient: isMe ? AppColors.outgoingBubble : null,
+                color: isMe ? null : AppColors.cardBackground,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(16),
                   topRight: const Radius.circular(16),
@@ -899,6 +1034,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       ? const Radius.circular(4)
                       : const Radius.circular(16),
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: isMe
+                        ? AppColors.primaryGreen.withValues(alpha: 0.20)
+                        : Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -1054,13 +1198,22 @@ class _ChatScreenState extends State<ChatScreen> {
 
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          color: AppColors.cardBackground,
+          decoration: BoxDecoration(
+            color: AppColors.cardBackground,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
           child: Row(
             children: [
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: AppColors.backgroundColor,
                     borderRadius: BorderRadius.circular(24),
                   ),
                   child: TextField(
@@ -1069,6 +1222,10 @@ class _ChatScreenState extends State<ChatScreen> {
                     enabled: !_isRecording,
                     decoration: InputDecoration(
                       hintText: 'Type a message...',
+                      hintStyle: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 14,
+                      ),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -1095,7 +1252,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 8),
 
               ValueListenableBuilder<TextEditingValue>(
                 valueListenable: _messageController,
@@ -1103,42 +1260,58 @@ class _ChatScreenState extends State<ChatScreen> {
                   final hasText = value.text.trim().isNotEmpty;
                   final showSend = hasText || _isRecording;
 
-                  return Container(
-                    decoration: const BoxDecoration(
-                      color: AppColors.primaryGreen,
-                      shape: BoxShape.circle,
-                    ),
-                    child: IconButton(
-                      onPressed: _isSending
-                          ? null
-                          : () {
-                              if (_isRecording) {
-                                _stopAndSendRecording();
-                              } else if (hasText) {
-                                _sendMessage();
-                              } else {
-                                _startRecording();
-                              }
-                            },
-                      icon: _isSending
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.white,
+                  return Material(
+                    color: Colors.transparent,
+                    shape: const CircleBorder(),
+                    child: Ink(
+                      decoration: const BoxDecoration(
+                        gradient: AppColors.primaryGradient,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Color(0x4000A884),
+                            blurRadius: 10,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: InkWell(
+                        onTap: _isSending
+                            ? null
+                            : () {
+                                if (_isRecording) {
+                                  _stopAndSendRecording();
+                                } else if (hasText) {
+                                  _sendMessage();
+                                } else {
+                                  _startRecording();
+                                }
+                              },
+                        customBorder: const CircleBorder(),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: _isSending
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                )
+                              : Icon(
+                                  showSend
+                                      ? (_isRecording
+                                            ? Icons.stop
+                                            : Icons.send_rounded)
+                                      : Icons.mic,
+                                  color: Colors.white,
+                                  size: 22,
                                 ),
-                              ),
-                            )
-                          : Icon(
-                              showSend
-                                  ? (_isRecording
-                                        ? Icons.stop
-                                        : Icons.send_rounded)
-                                  : Icons.mic,
-                              color: Colors.white,
-                            ),
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -1259,7 +1432,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(8),
-      color: Colors.red.withValues(alpha: 0.2),
+      color: Colors.red.withValues(alpha: 0.15),
       child: const Row(
         children: [
           Icon(Icons.cloud_off, size: 16, color: Colors.red),
@@ -1276,22 +1449,65 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.backgroundColor,
       appBar: _buildAppBar(),
-      body: Column(
-        children: [
-          _buildOfflineBanner(),
-          Expanded(
-            child: _messages.isEmpty
-                ? Center(
-                    child: Text(
-                      'No messages yet\nSay hello to ${ChatUserHelper.displayName(widget.user)}',
-                      textAlign: TextAlign.center,
-                    ),
-                  )
-                : _buildMessageList(),
-          ),
-          _buildMessageInput(),
-        ],
+      body: Container(
+        decoration: const BoxDecoration(gradient: AppColors.chatBackground),
+        child: Column(
+          children: [
+            _buildOfflineBanner(),
+            Expanded(
+              child: _messages.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(22),
+                              decoration: BoxDecoration(
+                                gradient: AppColors.primaryGradient,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppColors.primaryGreen.withValues(
+                                      alpha: 0.3,
+                                    ),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.chat_bubble_outline_rounded,
+                                size: 48,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            Text(
+                              'No messages yet',
+                              style: AppTextStyles.heading3,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Say hello to ${ChatUserHelper.displayName(widget.user)} 👋',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : _buildMessageList(),
+            ),
+            _buildMessageInput(),
+          ],
+        ),
       ),
     );
   }
@@ -1321,6 +1537,10 @@ class _ChatScreenState extends State<ChatScreen> {
           backgroundColor: isSuccess
               ? AppColors.successColor
               : AppColors.errorColor,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           duration: const Duration(seconds: 2),
         ),
       );

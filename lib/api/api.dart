@@ -5,8 +5,11 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:chat_app/models/call_log_model.dart';
+import 'package:chat_app/models/group_model.dart';
 import 'package:chat_app/models/message_model.dart';
 import 'package:chat_app/models/usermodel.dart';
+import 'package:chat_app/services/notification_trigger.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -96,6 +99,14 @@ class Apis {
         .collection('users')
         .where('id', isNotEqualTo: auth.currentUser?.uid)
         .snapshots();
+  }
+
+  static Stream<ChatUser?> getUserStream(String uid) {
+    return firestore
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .map((d) => d.exists ? ChatUser.fromJson(d.data()!, d.id) : null);
   }
 
   // ======================================================================
@@ -215,6 +226,27 @@ class Apis {
       lastMessageTime: now,
       lastSenderId: currentUser.uid,
     );
+
+    // 🔔 FCM TRIGGER
+    try {
+      final senderDoc = await firestore
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+      final senderName = (senderDoc.data()?['name'] ?? 'User').toString();
+
+      NotificationTrigger.notifyNewMessage(
+        chatId: _chatConversationId(currentUser.uid, receiverId),
+        messageId: message.id,
+        senderId: currentUser.uid,
+        receiverId: receiverId,
+        senderName: senderName,
+        text: cleanText,
+        fileType: fileType,
+      );
+    } catch (e) {
+      debugPrint('❌ FCM trigger error: $e');
+    }
 
     return true;
   }
@@ -345,6 +377,23 @@ class Apis {
     await batch.commit();
   }
 
+  static Future<void> markMessagesAsDelivered(String otherUserId) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return;
+
+    final pending = await _threadRef(otherUserId)
+        .where('receiverId', isEqualTo: currentUser.uid)
+        .where('messageStatus', isEqualTo: 'sent')
+        .get();
+    if (pending.docs.isEmpty) return;
+
+    final batch = firestore.batch();
+    for (final doc in pending.docs) {
+      batch.update(doc.reference, {'messageStatus': 'delivered'});
+    }
+    await batch.commit();
+  }
+
   // ======================================================================
   // TYPING
   // ======================================================================
@@ -393,8 +442,6 @@ class Apis {
   // MUTE / ARCHIVE
   // ======================================================================
 
-  /// Mute the chat. If [duration] is null → "Always" (permanent).
-  /// If provided, the mute auto-expires after the duration.
   static Future<bool> muteChat({
     required String otherUserId,
     Duration? duration,
@@ -506,11 +553,9 @@ class Apis {
   // CHAT LISTS
   // ======================================================================
 
-  /// Main chat list — excludes chats archived by me.
   static Stream<List<ChatSummary>> getMyChatsStream() =>
       _chatsStream(archived: false);
 
-  /// Archived chats — only chats I archived.
   static Stream<List<ChatSummary>> getArchivedChatsStream() =>
       _chatsStream(archived: true);
 
@@ -609,7 +654,6 @@ class Apis {
         );
   }
 
-  /// Full profiles of everyone I've blocked.
   static Stream<List<ChatUser>> blockedUsersStream() {
     final currentUser = auth.currentUser;
     if (currentUser == null) return const Stream.empty();
@@ -669,6 +713,325 @@ class Apis {
       'reason': reason,
       'createdAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  // ======================================================================
+  // 🆕 GROUPS
+  // ======================================================================
+
+  static CollectionReference<Map<String, dynamic>> get _groups =>
+      firestore.collection('groups');
+
+  static Future<String?> createGroup({
+    required String name,
+    required List<String> memberIds,
+    String image = '',
+  }) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return null;
+
+    try {
+      final members = <String>{currentUser.uid, ...memberIds}.toList();
+      final ref = await _groups.add({
+        'name': name.trim(),
+        'image': image,
+        'createdBy': currentUser.uid,
+        'createdAt': FieldValue.serverTimestamp(),
+        'members': members,
+        'admins': [currentUser.uid],
+        'lastMessage': '',
+        'lastSenderId': '',
+        'lastMessageTime': FieldValue.serverTimestamp(),
+      });
+
+      try {
+        NotificationTrigger.notifyGroupCreated(
+          groupId: ref.id,
+          groupName: name.trim(),
+          createdBy: currentUser.uid,
+          members: members,
+        );
+      } catch (e) {
+        debugPrint('❌ FCM group trigger error: $e');
+      }
+
+      return ref.id;
+    } catch (e) {
+      debugPrint('createGroup error: $e');
+      return null;
+    }
+  }
+
+  static Stream<List<GroupModel>> getMyGroupsStream() {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return const Stream.empty();
+
+    return _groups
+        .where('members', arrayContains: currentUser.uid)
+        .snapshots()
+        .map((snap) {
+          final list = snap.docs.map(GroupModel.fromDoc).toList();
+          list.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
+          return list;
+        });
+  }
+
+  static Stream<GroupModel?> getGroupStream(String groupId) {
+    return _groups
+        .doc(groupId)
+        .snapshots()
+        .map((d) => d.exists ? GroupModel.fromDoc(d) : null);
+  }
+
+  static Future<bool> sendGroupMessage({
+    required String groupId,
+    required String text,
+    String fileType = 'text',
+    String fileUrl = '',
+    String fileName = '',
+  }) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+
+    try {
+      final userDoc = await firestore
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+      final senderName = (userDoc.data()?['name'] ?? 'User').toString();
+
+      await _groups.doc(groupId).collection('messages').add({
+        'senderId': currentUser.uid,
+        'senderName': senderName,
+        'text': text,
+        'fileType': fileType,
+        'fileUrl': fileUrl,
+        'fileName': fileName,
+        'timestamp': FieldValue.serverTimestamp(),
+        'messageStatus': 'sent',
+        'isDeleted': false,
+      });
+
+      final preview = fileType == 'text'
+          ? text
+          : fileType == 'image'
+          ? '📷 Photo'
+          : fileType == 'audio'
+          ? '🎤 Voice message'
+          : fileType == 'document'
+          ? '📎 Document'
+          : text;
+
+      await _groups.doc(groupId).update({
+        'lastMessage': preview,
+        'lastSenderId': currentUser.uid,
+        'lastMessageTime': FieldValue.serverTimestamp(),
+      });
+
+      try {
+        NotificationTrigger.notifyNewGroupMessage(
+          groupId: groupId,
+          senderId: currentUser.uid,
+          senderName: senderName,
+          text: text,
+          fileType: fileType,
+        );
+      } catch (e) {
+        debugPrint('❌ FCM group trigger error: $e');
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('sendGroupMessage error: $e');
+      return false;
+    }
+  }
+
+  static Stream<List<Message>> getGroupMessagesStream(String groupId) {
+    return _groups
+        .doc(groupId)
+        .collection('messages')
+        .orderBy('timestamp', descending: false)
+        .snapshots()
+        .map(
+          (snap) => snap.docs.map((d) {
+            final data = d.data();
+            return Message(
+              id: d.id,
+              senderId: (data['senderId'] ?? '').toString(),
+              receiverId: groupId,
+              text: (data['text'] ?? '').toString(),
+              fileType: (data['fileType'] ?? 'text').toString(),
+              fileUrl: (data['fileUrl'] ?? '').toString(),
+              fileName: (data['fileName'] ?? '').toString(),
+              timestamp:
+                  (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              messageStatus: (data['messageStatus'] ?? 'sent').toString(),
+              isDeleted: data['isDeleted'] == true,
+            );
+          }).toList(),
+        );
+  }
+
+  static Future<bool> addGroupMembers({
+    required String groupId,
+    required List<String> userIds,
+  }) async {
+    try {
+      await _groups.doc(groupId).update({
+        'members': FieldValue.arrayUnion(userIds),
+      });
+      return true;
+    } catch (e) {
+      debugPrint('addGroupMembers error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> removeGroupMember({
+    required String groupId,
+    required String userId,
+  }) async {
+    try {
+      await _groups.doc(groupId).update({
+        'members': FieldValue.arrayRemove([userId]),
+        'admins': FieldValue.arrayRemove([userId]),
+      });
+      return true;
+    } catch (e) {
+      debugPrint('removeGroupMember error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> leaveGroup(String groupId) async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+    return removeGroupMember(groupId: groupId, userId: currentUser.uid);
+  }
+
+  static Future<bool> makeAdmin({
+    required String groupId,
+    required String userId,
+  }) async {
+    try {
+      await _groups.doc(groupId).update({
+        'admins': FieldValue.arrayUnion([userId]),
+      });
+      return true;
+    } catch (e) {
+      debugPrint('makeAdmin error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> dismissAdmin({
+    required String groupId,
+    required String userId,
+  }) async {
+    try {
+      await _groups.doc(groupId).update({
+        'admins': FieldValue.arrayRemove([userId]),
+      });
+      return true;
+    } catch (e) {
+      debugPrint('dismissAdmin error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> updateGroupName({
+    required String groupId,
+    required String name,
+  }) async {
+    try {
+      await _groups.doc(groupId).update({'name': name.trim()});
+      return true;
+    } catch (e) {
+      debugPrint('updateGroupName error: $e');
+      return false;
+    }
+  }
+
+  // ======================================================================
+  // 📞 CALL LOGS
+  // ======================================================================
+
+  static CollectionReference<Map<String, dynamic>> get _callLogs =>
+      firestore.collection('call_logs');
+
+  static Future<String?> saveCallLog({
+    required String callerId,
+    required String callerName,
+    required String receiverId,
+    required String receiverName,
+    required String type,
+    required String status,
+    int durationSeconds = 0,
+    bool isGroup = false,
+    String? groupId,
+  }) async {
+    try {
+      final ref = await _callLogs.add({
+        'callerId': callerId,
+        'callerName': callerName,
+        'receiverId': receiverId,
+        'receiverName': receiverName,
+        'type': type,
+        'status': status,
+        'durationSeconds': durationSeconds,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isGroup': isGroup,
+        'groupId': groupId,
+        'participants': [callerId, receiverId],
+      });
+      debugPrint('✅ Call log saved: $status ($type)');
+      return ref.id;
+    } catch (e) {
+      debugPrint('❌ saveCallLog error: $e');
+      return null;
+    }
+  }
+
+  static Stream<List<CallLogModel>> getMyCallLogsStream() {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return const Stream.empty();
+
+    return _callLogs
+        .where('participants', arrayContains: currentUser.uid)
+        .orderBy('timestamp', descending: true)
+        .limit(200)
+        .snapshots()
+        .map((snap) => snap.docs.map(CallLogModel.fromDoc).toList());
+  }
+
+  static Future<bool> deleteCallLog(String logId) async {
+    try {
+      await _callLogs.doc(logId).delete();
+      return true;
+    } catch (e) {
+      debugPrint('❌ deleteCallLog error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> clearMyCallLogs() async {
+    final currentUser = auth.currentUser;
+    if (currentUser == null) return false;
+    try {
+      final snap = await _callLogs
+          .where('participants', arrayContains: currentUser.uid)
+          .get();
+      final batch = firestore.batch();
+      for (final doc in snap.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+      return true;
+    } catch (e) {
+      debugPrint('❌ clearMyCallLogs error: $e');
+      return false;
+    }
   }
 }
 

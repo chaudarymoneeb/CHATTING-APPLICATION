@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+# app_constants
+/lib/app_constants.dart
+/lib/services/notification_trigger.dart
+/lib/firebase_options.dart
+/lib/api/cloudinary_cloud/cloudinary_cloud.dart
+

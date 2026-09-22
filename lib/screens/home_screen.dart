@@ -5,14 +5,18 @@
 import 'package:chat_app/api/api.dart';
 import 'package:chat_app/app_constant.dart';
 import 'package:chat_app/helper/chat_user.dart';
+import 'package:chat_app/models/group_model.dart';
 import 'package:chat_app/models/usermodel.dart';
 import 'package:chat_app/screens/archived_screen.dart';
+import 'package:chat_app/screens/call_logs_screen.dart'; // 📞 NEW
 import 'package:chat_app/screens/chatscreen.dart';
+import 'package:chat_app/screens/group_chat_screen.dart';
 import 'package:chat_app/screens/new_group_screen.dart';
 import 'package:chat_app/screens/profile_screen.dart';
 import 'package:chat_app/screens/settings_screen.dart';
 import 'package:chat_app/screens/starred_screen.dart';
 import 'package:chat_app/screens/user_picker_screen.dart';
+import 'package:chat_app/widgets/gradient_appbar.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -30,7 +34,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final FocusNode _searchFocusNode = FocusNode();
   bool _isSearchVisible = false;
 
-  // Selection mode
   final Set<String> _selectedChatIds = <String>{};
   bool get _isSelectionMode => _selectedChatIds.isNotEmpty;
 
@@ -80,18 +83,15 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _selectedChatIds.clear());
   }
 
-  // ========== SELECTION ACTIONS ==========
-
   Future<void> _muteSelected(List<ChatSummary> chats, bool mute) async {
     final targets = chats
         .where((c) => _selectedChatIds.contains(c.user.id))
         .toList();
     if (targets.isEmpty) return;
     _exitSelection();
-
     if (mute) {
       final duration = await _showMuteDurationSheet();
-      if (duration == null) return; // cancelled
+      if (duration == null) return;
       for (final c in targets) {
         await Apis.muteChat(otherUserId: c.user.id, duration: duration);
       }
@@ -112,7 +112,6 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList();
     if (targets.isEmpty) return;
     _exitSelection();
-
     for (final c in targets) {
       await Apis.archiveChat(otherUserId: c.user.id);
     }
@@ -120,56 +119,58 @@ class _HomeScreenState extends State<HomeScreen> {
     _snack('${targets.length} chat(s) archived');
   }
 
-  /// Returns null if user cancels; Duration.zero = "Always"; other = timed.
   Future<Duration?> _showMuteDurationSheet() async {
     return showModalBottomSheet<Duration>(
       context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text('Mute notifications?', style: AppTextStyles.heading3),
-            const SizedBox(height: 6),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                'You will not receive notifications for this chat.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textSecondary),
+              const SizedBox(height: 16),
+              const Text('Mute notifications?', style: AppTextStyles.heading3),
+              const SizedBox(height: 6),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  'You will not receive notifications for this chat.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            ListTile(
-              leading: const Icon(Icons.access_time_rounded),
-              title: const Text('For 8 hours'),
-              onTap: () => Navigator.pop(ctx, const Duration(hours: 8)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.calendar_today_rounded),
-              title: const Text('For 1 week'),
-              onTap: () => Navigator.pop(ctx, const Duration(days: 7)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.volume_off_rounded),
-              title: const Text('Always'),
-              onTap: () => Navigator.pop(ctx, Duration.zero),
-            ),
-            const SizedBox(height: 8),
-          ],
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.access_time_rounded),
+                title: const Text('For 8 hours'),
+                onTap: () => Navigator.pop(ctx, const Duration(hours: 8)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_today_rounded),
+                title: const Text('For 1 week'),
+                onTap: () => Navigator.pop(ctx, const Duration(days: 7)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.volume_off_rounded),
+                title: const Text('Always'),
+                onTap: () => Navigator.pop(ctx, Duration.zero),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -182,6 +183,10 @@ class _HomeScreenState extends State<HomeScreen> {
         SnackBar(
           content: Text(msg),
           backgroundColor: AppColors.successColor,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -190,63 +195,101 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.backgroundColor,
       appBar: _isSelectionMode ? _buildSelectionAppBar() : _buildAppBar(),
       floatingActionButton: _isSelectionMode
           ? null
-          : FloatingActionButton.extended(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const UserPickerScreen()),
-                );
-              },
-              backgroundColor: AppColors.primaryGreen,
-              foregroundColor: Colors.white,
-              elevation: 3,
-              icon: const Icon(Icons.person_add_alt_1_rounded),
-              label: const Text('Add contact'),
+          : Container(
+              decoration: BoxDecoration(
+                gradient: AppColors.primaryGradient,
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primaryGreen.withValues(alpha: 0.4),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: FloatingActionButton.extended(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const UserPickerScreen()),
+                  );
+                },
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                foregroundColor: Colors.white,
+                icon: const Icon(Icons.person_add_alt_1_rounded),
+                label: const Text(
+                  'Add contact',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
             ),
-      body: Column(
-        children: [
-          if (_isSearchVisible && !_isSelectionMode) _buildSearchBar(),
-          Expanded(child: _buildChatList()),
-        ],
+      body: Container(
+        decoration: const BoxDecoration(gradient: AppColors.softGradient),
+        child: Column(
+          children: [
+            if (_isSearchVisible && !_isSelectionMode) _buildSearchBar(),
+            Expanded(child: _buildChatList()),
+          ],
+        ),
       ),
     );
   }
 
-  // ========== NORMAL APP BAR ==========
   PreferredSizeWidget _buildAppBar() {
-    return AppBar(
+    return GradientAppBar(
       toolbarHeight: 68,
       leading: const Padding(
         padding: EdgeInsets.only(left: 16),
-        child: Icon(
-          CupertinoIcons.home,
-          color: AppColors.primaryGreen,
-          size: 27,
-        ),
+        child: Icon(CupertinoIcons.home, color: Colors.white, size: 26),
       ),
-      title: const Column(
+      titleWidget: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text('We Chat', style: AppTextStyles.heading2),
+          Text(
+            'We Chat',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              letterSpacing: 0.3,
+            ),
+          ),
           SizedBox(height: 2),
-          Text('Chats', style: AppTextStyles.bodySmall),
+          Text('Chats', style: TextStyle(fontSize: 12, color: Colors.white70)),
         ],
       ),
       actions: [
+        // 📞 CALLS ICON — NEW
+        IconButton(
+          tooltip: 'Calls',
+          onPressed: () {
+            Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const CallLogsScreen()));
+          },
+          icon: const Icon(Icons.call_rounded, color: Colors.white),
+        ),
+
+        // 🔍 Search
         IconButton(
           tooltip: _isSearchVisible ? 'Close search' : 'Search chats',
           onPressed: _isSearchVisible ? _closeSearch : _openSearch,
           icon: Icon(
             _isSearchVisible ? Icons.close_rounded : Icons.search_rounded,
-            color: AppColors.primaryGreen,
+            color: Colors.white,
           ),
         ),
+
+        // ⋮ Menu
         PopupMenuButton<_HomeMenuAction>(
-          icon: const Icon(
-            Icons.more_horiz_rounded,
-            color: AppColors.primaryGreen,
+          icon: const Icon(Icons.more_horiz_rounded, color: Colors.white),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
           onSelected: (action) {
             switch (action) {
@@ -254,24 +297,30 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ProfileScreen()),
                 );
+                break;
               case _HomeMenuAction.newGroup:
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const NewGroupScreen()),
                 );
+                break;
               case _HomeMenuAction.starred:
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const StarredScreen()),
                 );
+                break;
               case _HomeMenuAction.archived:
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ArchivedScreen()),
                 );
+                break;
               case _HomeMenuAction.settings:
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 );
+                break;
               case _HomeMenuAction.about:
                 _showAboutDialog();
+                break;
             }
           },
           itemBuilder: (context) => const [
@@ -321,14 +370,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== SELECTION APP BAR ==========
   PreferredSizeWidget _buildSelectionAppBar() {
     final chats = _lastLoadedChats;
     final selected = chats
         .where((c) => _selectedChatIds.contains(c.user.id))
         .toList();
-
-    // Are ALL selected chats already muted?
     final allMuted = selected.isNotEmpty && selected.every((c) => c.isMuted);
 
     return AppBar(
@@ -343,7 +389,9 @@ class _HomeScreenState extends State<HomeScreen> {
           fontWeight: FontWeight.w600,
         ),
       ),
-      backgroundColor: AppColors.primaryGreen,
+      flexibleSpace: Container(
+        decoration: const BoxDecoration(gradient: AppColors.primaryGradient),
+      ),
       actions: [
         IconButton(
           tooltip: allMuted ? 'Unmute' : 'Mute',
@@ -360,6 +408,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           onSelected: (action) async {
             switch (action) {
               case 'markRead':
@@ -433,7 +484,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildSearchBar() {
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
       child: TextField(
         controller: _searchController,
         focusNode: _searchFocusNode,
@@ -471,62 +522,95 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Cache last loaded chats so selection toolbar can read mute state
   List<ChatSummary> _lastLoadedChats = const [];
 
-  // ============ CHAT LIST ============
   Widget _buildChatList() {
     return StreamBuilder<List<ChatSummary>>(
       stream: Apis.getMyChatsStream(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          debugPrint('Chat list error: ${snapshot.error}');
-          return _buildErrorState();
-        }
+      builder: (context, chatSnap) {
+        return StreamBuilder<List<GroupModel>>(
+          stream: Apis.getMyGroupsStream(),
+          builder: (context, groupSnap) {
+            if (chatSnap.hasError || groupSnap.hasError) {
+              return _buildErrorState();
+            }
+            final chatsLoading =
+                chatSnap.connectionState == ConnectionState.waiting &&
+                !chatSnap.hasData;
+            final groupsLoading =
+                groupSnap.connectionState == ConnectionState.waiting &&
+                !groupSnap.hasData;
+            if (chatsLoading && groupsLoading) {
+              return const Center(
+                child: CircularProgressIndicator(color: AppColors.primaryGreen),
+              );
+            }
+            final chats = chatSnap.data ?? [];
+            final groups = groupSnap.data ?? [];
+            _lastLoadedChats = chats;
+            final query = _searchController.text.trim().toLowerCase();
 
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: CircularProgressIndicator(color: AppColors.primaryGreen),
-          );
-        }
+            final visibleChats = chats.where((c) {
+              if (query.isEmpty) return true;
+              return ChatUserHelper.matches(c.user, query) ||
+                  c.lastMessage.toLowerCase().contains(query);
+            }).toList();
 
-        final chats = snapshot.data ?? [];
-        _lastLoadedChats = chats;
+            final visibleGroups = groups.where((g) {
+              if (query.isEmpty) return true;
+              return g.name.toLowerCase().contains(query) ||
+                  g.lastMessage.toLowerCase().contains(query);
+            }).toList();
 
-        final visibleChats = chats
-            .where(
-              (c) => ChatUserHelper.matches(c.user, _searchController.text),
-            )
-            .toList();
+            if (visibleChats.isEmpty && visibleGroups.isEmpty) {
+              if (chats.isEmpty && groups.isEmpty) return _buildEmptyState();
+              return _buildNoResultsState();
+            }
 
-        if (chats.isEmpty) return _buildEmptyState();
-        if (visibleChats.isEmpty) return _buildNoResultsState();
+            final items = <_ListItem>[
+              ...visibleGroups.map((g) => _ListItem.group(g)),
+              ...visibleChats.map((c) => _ListItem.chat(c)),
+            ];
 
-        return ListView.separated(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
-          itemCount: visibleChats.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final chat = visibleChats[index];
-            final selected = _selectedChatIds.contains(chat.user.id);
-            return _ChatTile(
-              chat: chat,
-              isSelected: selected,
-              isSelectionMode: _isSelectionMode,
-              onTap: () {
-                if (_isSelectionMode) {
-                  _toggleSelection(chat.user.id);
-                } else {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ChatScreen(user: chat.user),
-                    ),
+            return ListView.separated(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
+              itemCount: items.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                if (item.group != null) {
+                  final group = item.group!;
+                  return _GroupTile(
+                    group: group,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => GroupChatScreen(groupId: group.id),
+                        ),
+                      );
+                    },
                   );
                 }
-              },
-              onLongPress: () {
-                _toggleSelection(chat.user.id);
+                final chat = item.chat!;
+                final selected = _selectedChatIds.contains(chat.user.id);
+                return _ChatTile(
+                  chat: chat,
+                  isSelected: selected,
+                  isSelectionMode: _isSelectionMode,
+                  onTap: () {
+                    if (_isSelectionMode) {
+                      _toggleSelection(chat.user.id);
+                    } else {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ChatScreen(user: chat.user),
+                        ),
+                      );
+                    }
+                  },
+                  onLongPress: () => _toggleSelection(chat.user.id),
+                );
               },
             );
           },
@@ -572,9 +656,139 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ======================================================================
-// CHAT TILE
-// ======================================================================
+class _ListItem {
+  final ChatSummary? chat;
+  final GroupModel? group;
+  const _ListItem._({this.chat, this.group});
+  factory _ListItem.chat(ChatSummary c) => _ListItem._(chat: c);
+  factory _ListItem.group(GroupModel g) => _ListItem._(group: g);
+}
+
+class _GroupTile extends StatelessWidget {
+  final GroupModel group;
+  final VoidCallback onTap;
+  const _GroupTile({required this.group, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasMessage = group.lastMessage.isNotEmpty;
+    final me = Apis.auth.currentUser?.uid;
+    final isMine = group.lastSenderId == me;
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(18),
+      child: Ink(
+        decoration: BoxDecoration(
+          color: AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    gradient: AppColors.primaryGradient,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primaryGreen.withValues(alpha: 0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.groups_rounded,
+                    color: Colors.white,
+                    size: 30,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        group.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodyLarge.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15.5,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          if (isMine && hasMessage)
+                            const Text(
+                              'You: ',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          Expanded(
+                            child: Text(
+                              hasMessage
+                                  ? group.lastMessage
+                                  : 'Tap to start chatting',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.bodySmall.copyWith(
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                                fontStyle: hasMessage
+                                    ? FontStyle.normal
+                                    : FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  hasMessage ? _shortTime(group.lastMessageTime) : '',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textLight,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _shortTime(DateTime t) {
+    final diff = DateTime.now().difference(t);
+    if (diff.inSeconds < 60) return 'now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+    if (diff.inHours < 24) return '${diff.inHours}h';
+    if (diff.inDays < 7) return '${diff.inDays}d';
+    return '${t.day}/${t.month}';
+  }
+}
 
 class _ChatTile extends StatelessWidget {
   const _ChatTile({
@@ -604,90 +818,106 @@ class _ChatTile extends StatelessWidget {
         ? 'Tap to start chatting'
         : chat.user.about;
 
-    final bg = isSelected
-        ? AppColors.primaryGreen.withValues(alpha: 0.12)
-        : AppColors.cardBackground;
-
     return Material(
-      color: bg,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(18),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              if (isSelectionMode) ...[
-                Icon(
-                  isSelected
-                      ? Icons.check_circle
-                      : Icons.radio_button_unchecked,
-                  color: isSelected
-                      ? AppColors.primaryGreen
-                      : Colors.grey.shade400,
-                  size: 22,
+      child: Ink(
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.primaryGreen.withValues(alpha: 0.10)
+              : AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(18),
+          border: isSelected
+              ? Border.all(color: AppColors.primaryGreen, width: 1.5)
+              : null,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                if (isSelectionMode) ...[
+                  Icon(
+                    isSelected
+                        ? Icons.check_circle
+                        : Icons.radio_button_unchecked,
+                    color: isSelected
+                        ? AppColors.primaryGreen
+                        : Colors.grey.shade400,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                _OnlineAvatar(
+                  imageUrl: chat.user.image,
+                  initials: ChatUserHelper.initials(chat.user),
+                  isOnline: chat.user.isOnline,
+                  radius: 28,
                 ),
-                const SizedBox(width: 10),
-              ],
-              _OnlineAvatar(
-                imageUrl: chat.user.image,
-                initials: ChatUserHelper.initials(chat.user),
-                isOnline: chat.user.isOnline,
-                radius: 28,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTextStyles.bodyLarge.copyWith(
-                              fontWeight: FontWeight.w700,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.bodyLarge.copyWith(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15.5,
+                              ),
                             ),
                           ),
-                        ),
-                        if (chat.isMuted) ...[
-                          const SizedBox(width: 6),
-                          Icon(
-                            Icons.volume_off_rounded,
-                            size: 16,
-                            color: AppColors.textSecondary,
-                          ),
+                          if (chat.isMuted) ...[
+                            const SizedBox(width: 6),
+                            const Icon(
+                              Icons.volume_off_rounded,
+                              size: 15,
+                              color: AppColors.textSecondary,
+                            ),
+                          ],
                         ],
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.bodySmall.copyWith(
-                        fontSize: 13,
-                        fontStyle: hasMessage
-                            ? FontStyle.normal
-                            : FontStyle.italic,
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          fontSize: 13,
+                          color: AppColors.textSecondary,
+                          fontStyle: hasMessage
+                              ? FontStyle.normal
+                              : FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                hasMessage ? _shortTime(chat.lastMessageTime) : '',
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
+                const SizedBox(width: 8),
+                Text(
+                  hasMessage ? _shortTime(chat.lastMessageTime) : '',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textLight,
+                    fontSize: 11.5,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -703,10 +933,6 @@ class _ChatTile extends StatelessWidget {
     return '${t.day}/${t.month}';
   }
 }
-
-// ======================================================================
-// ONLINE AVATAR
-// ======================================================================
 
 class _OnlineAvatar extends StatelessWidget {
   const _OnlineAvatar({
@@ -737,58 +963,76 @@ class _OnlineAvatar extends StatelessWidget {
     );
 
     return SizedBox(
-      width: radius * 2 + 4,
-      height: radius * 2 + 4,
+      width: radius * 2 + 8,
+      height: radius * 2 + 8,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          ClipOval(
-            child: SizedBox(
-              width: radius * 2,
-              height: radius * 2,
-              child: imageUrl.trim().isEmpty
-                  ? fallback
-                  : Image.network(
-                      imageUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => fallback,
-                      loadingBuilder: (_, child, progress) =>
-                          progress == null ? child : fallback,
-                    ),
+          Container(
+            width: radius * 2 + 8,
+            height: radius * 2 + 8,
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: isOnline
+                  ? AppColors.primaryGradient
+                  : const LinearGradient(colors: [Colors.grey, Colors.grey]),
             ),
-          ),
-          Positioned(
-            bottom: 0,
-            right: 0,
             child: Container(
-              width: radius * 0.55,
-              height: radius * 0.55,
-              decoration: BoxDecoration(
-                color: isOnline ? AppColors.successColor : Colors.grey,
+              padding: const EdgeInsets.all(2),
+              decoration: const BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
+                color: Colors.white,
+              ),
+              child: ClipOval(
+                child: SizedBox(
+                  width: radius * 2,
+                  height: radius * 2,
+                  child: imageUrl.trim().isEmpty
+                      ? fallback
+                      : Image.network(
+                          imageUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => fallback,
+                          loadingBuilder: (_, child, progress) =>
+                              progress == null ? child : fallback,
+                        ),
+                ),
               ),
             ),
           ),
+          if (isOnline)
+            Positioned(
+              bottom: 4,
+              right: 4,
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: AppColors.successColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-// ======================================================================
-// HELPERS
-// ======================================================================
-
 class _MenuItem extends StatelessWidget {
   const _MenuItem({required this.icon, required this.label});
-
   final IconData icon;
   final String label;
 
   @override
   Widget build(BuildContext context) => Row(
-    children: [Icon(icon, size: 20), const SizedBox(width: 12), Text(label)],
+    children: [
+      Icon(icon, size: 20, color: AppColors.textSecondary),
+      const SizedBox(width: 12),
+      Text(label),
+    ],
   );
 }
 
@@ -817,10 +1061,17 @@ class _StatusPanel extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
-              color: AppColors.primaryGreen.withValues(alpha: 0.10),
+              gradient: AppColors.primaryGradient,
               shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primaryGreen.withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
             ),
-            child: Icon(icon, size: 48, color: AppColors.primaryGreen),
+            child: Icon(icon, size: 48, color: Colors.white),
           ),
           const SizedBox(height: 22),
           Text(

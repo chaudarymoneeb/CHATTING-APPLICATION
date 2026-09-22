@@ -28,32 +28,25 @@ class _SplashScreenState extends State<SplashScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
-
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeIn));
-
     _scaleAnimation = Tween<double>(
       begin: 0.5,
       end: 1.0,
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.elasticOut));
-
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.3),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
-
     _controller.forward();
   }
 
   Future<void> _navigateAfterDelay() async {
     await Future.delayed(const Duration(milliseconds: 2000));
-
     if (!mounted) return;
-
     final isSignedIn = FirebaseAuth.instance.currentUser != null;
-
     Navigator.of(context).pushReplacementNamed(isSignedIn ? '/home' : '/login');
   }
 
@@ -69,17 +62,7 @@ class _SplashScreenState extends State<SplashScreen>
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppColors.darkGreen,
-              AppColors.primaryGreen,
-              AppColors.lightGreen,
-            ],
-          ),
-        ),
+        decoration: const BoxDecoration(gradient: AppColors.splashGradient),
         child: SafeArea(
           child: Center(
             child: FadeTransition(
@@ -91,7 +74,6 @@ class _SplashScreenState extends State<SplashScreen>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Animated Logo
                       Container(
                         padding: const EdgeInsets.all(24),
                         decoration: BoxDecoration(
@@ -99,9 +81,9 @@ class _SplashScreenState extends State<SplashScreen>
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.2),
-                              blurRadius: 32,
-                              spreadRadius: 8,
+                              color: Colors.black.withValues(alpha: 0.25),
+                              blurRadius: 40,
+                              spreadRadius: 10,
                             ),
                           ],
                         ),
@@ -112,17 +94,15 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                       ),
                       const SizedBox(height: 32),
-
-                      // App Name
                       Text(
                         'We Chat',
                         style: AppTextStyles.heading1.copyWith(
                           color: Colors.white,
+                          fontSize: 34,
+                          letterSpacing: 1,
                         ),
                       ),
                       const SizedBox(height: 12),
-
-                      // Tagline
                       Text(
                         'Connect instantly, chat safely',
                         style: AppTextStyles.bodyMedium.copyWith(
@@ -131,8 +111,6 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                       ),
                       const SizedBox(height: 48),
-
-                      // Loading Indicator
                       SizedBox(
                         width: 32,
                         height: 32,

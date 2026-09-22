@@ -5,6 +5,9 @@ import 'package:chat_app/firebase_options.dart';
 import 'package:chat_app/screens/home_screen.dart';
 import 'package:chat_app/screens/login_screen.dart';
 import 'package:chat_app/screens/splash_screen.dart';
+import 'package:chat_app/services/call_log_service.dart';
+import 'package:chat_app/services/notification_service.dart'
+    show NotificationService;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -12,16 +15,16 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
 
-// ✅ Global navigator key — ZEGOCLOUD ko chahiye incoming call screen ke liye
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await NotificationService().initialize();
+
   await GoogleSignIn.instance.initialize();
 
-  // ✅ ZEGOCLOUD ko navigatorKey set karo (init se pehle)
   ZegoUIKitPrebuiltCallInvitationService().setNavigatorKey(navigatorKey);
 
   runApp(const MyApp());
@@ -35,7 +38,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'We Chat',
-      navigatorKey: navigatorKey, // ✅ register karo
+      navigatorKey: navigatorKey,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -51,7 +54,6 @@ class MyApp extends StatelessWidget {
           surfaceTintColor: Colors.transparent,
         ),
       ),
-      // ✅ Wrap SplashScreen with ZegoServiceInitializer
       home: const ZegoServiceInitializer(child: SplashScreen()),
       routes: {
         '/login': (_) => const LoginScreen(),
@@ -61,10 +63,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// ============================================
-// 📞 ZEGOCLOUD INITIALIZER
-// Firebase auth changes pe auto init/uninit karta hai
-// ============================================
 class ZegoServiceInitializer extends StatefulWidget {
   final Widget child;
   const ZegoServiceInitializer({super.key, required this.child});
@@ -94,13 +92,60 @@ class _ZegoServiceInitializerState extends State<ZegoServiceInitializer> {
       await ZegoUIKitPrebuiltCallInvitationService().init(
         appID: AppConstants.zegoAppId,
         appSign: AppConstants.zegoAppSign,
-        userID: user.uid, // Firebase UID = ZEGOCLOUD User ID
+        userID: user.uid,
         userName: user.displayName ?? user.email ?? 'User',
         plugins: [ZegoUIKitSignalingPlugin()],
+        invitationEvents: ZegoUIKitPrebuiltCallInvitationEvents(
+          onIncomingCallReceived: (_, caller, callType, _, _) {
+            CallLogService.instance.onCallReceived(
+              callerId: caller.id,
+              callerName: caller.name,
+              isVideo: callType == ZegoCallInvitationType.videoCall,
+            );
+          },
+          onIncomingCallAcceptButtonPressed: () {
+            CallLogService.instance.onCallAnswered();
+          },
+          onIncomingCallDeclineButtonPressed: () {
+            CallLogService.instance.onCallEnded(endReason: 'decline');
+          },
+          onIncomingCallTimeout: (_, __) {
+            CallLogService.instance.onCallEnded(endReason: 'timeout');
+          },
+          onIncomingCallCanceled: (_, __, ___) {
+            CallLogService.instance.onCallEnded(endReason: 'cancel');
+          },
+          onOutgoingCallAccepted: (_, __) {
+            CallLogService.instance.onCallAnswered();
+          },
+          onOutgoingCallDeclined: (_, __, ___) {
+            CallLogService.instance.onCallEnded(endReason: 'decline');
+          },
+          onOutgoingCallRejectedCauseBusy: (_, __, ___) {
+            CallLogService.instance.onCallEnded(endReason: 'decline');
+          },
+          onOutgoingCallCancelButtonPressed: () {
+            CallLogService.instance.onCallEnded(endReason: 'cancel');
+          },
+          onOutgoingCallTimeout: (_, __, ___) {
+            CallLogService.instance.onCallEnded(endReason: 'timeout');
+          },
+        ),
+        events: ZegoUIKitPrebuiltCallEvents(
+          onCallEnd: (_, defaultAction) {
+            CallLogService.instance.onCallEnded();
+            defaultAction();
+          },
+        ),
       );
+
+      ZegoUIKitPrebuiltCallInvitationService().useSystemCallingUI([
+        ZegoUIKitSignalingPlugin(),
+      ]);
+
       debugPrint('✅ ZEGOCLOUD initialized for ${user.uid}');
-    } catch (e) {
-      debugPrint('❌ ZEGOCLOUD init error: $e');
+    } catch (e, st) {
+      debugPrint('❌ ZEGOCLOUD init error: $e\n$st');
     }
   }
 

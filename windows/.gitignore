@@ -15,3 +15,8 @@ x86/
 *.[Cc]ache
 # but keep track of directories ending in .cache
 !*.[Cc]ache/
+
+lib/app_constants.dart
+lib/services/notification_trigger.dart
+lib/firebase_options.dart
+lib/api/cloudinary_cloud/cloudinary_cloud.dart
